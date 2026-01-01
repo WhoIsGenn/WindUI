@@ -424,6 +424,7 @@ end)
 
 -- Load WindUI
 local WindUI
+
 do
     local ok, result = pcall(function()
         return require("./src/Init")
@@ -432,16 +433,29 @@ do
     if ok then
         WindUI = result
     else 
-        WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+        WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/WhoIsGenn/WindUI/main/dist/main.lua"))()
     end
 end
+
+-- Colors for UI
+local Purple = Color3.fromHex("#7775F2")
+local Yellow = Color3.fromHex("#ECA201")
+local Green = Color3.fromHex("#10C550")
+local Grey = Color3.fromHex("#83889E")
+local Blue = Color3.fromHex("#257AF7")
+local Red = Color3.fromHex("#EF4F1D")
 
 -- Create Main Window
 local Window = WindUI:CreateWindow({
     Title = "Fish It Hub",
-    Theme = "Dark",
-    Size = UDim2.fromScale(0.55, 0.65),
-    HasOutline = true,
+    Author = "by .ftgs • Footagesus",
+    Folder = "FishItHub",
+    Icon = "fish",
+    IconSize = 22*2,
+    NewElements = true,
+    Size = UDim2.fromOffset(700,700),
+    HideSearchBar = true,
+    
     OpenButton = {
         Title = "Open Fish It Hub",
         CornerRadius = UDim.new(1,0),
@@ -457,176 +471,217 @@ local Window = WindUI:CreateWindow({
     Topbar = {
         Height = 44,
         ButtonsType = "Mac",
-    },
-    Folder = "FishItHub"
+    }
 })
 
--- Create Tabs
-local TabFishing  = Window:CreateTab("Fishing","fish")
-local TabInstant  = Window:CreateTab("Instant","zap")
-local TabBlatant  = Window:CreateTab("Blatant","bomb")
-local TabBeta     = Window:CreateTab("Blatant [BETA]","flask")
-local TabMisc     = Window:CreateTab("MISC","settings")
-local TabWeather  = Window:CreateTab("Weather","cloud")
-local TabFav      = Window:CreateTab("Favorite","star")
-local TabSell     = Window:CreateTab("Sell","dollar-sign")
+-- Add version tag
+Window:Tag({
+    Title = "v1.0",
+    Icon = "fish",
+    Color = Color3.fromHex("#1c1c1c"),
+    Border = true,
+})
 
--- Fishing Tab
-TabFishing:CreateToggle({
-    Name = "Auto Legit Fishing",
+-- Create Tab Sections
+local FishingSection = Window:Section({
+    Title = "Fishing Modes",
+})
+
+local UtilitySection = Window:Section({
+    Title = "Utilities",
+})
+
+local SettingsSection = Window:Section({
+    Title = "Settings",
+})
+
+-- FISHING MODES TAB
+local FishingTab = FishingSection:Tab({
+    Title = "Fishing",
+    Icon = "fish",
+    IconColor = Blue,
+    IconShape = "Square",
+    Border = true,
+})
+
+-- Legit Fishing Group
+local LegitGroup = FishingTab:Group({})
+
+LegitGroup:Toggle({
+    Flag = "LegitMode",
+    Title = "Auto Legit Fishing",
+    Icon = "mouse-pointer",
     Callback = function(v)
         Core:SetMode(v and "Legit" or "None")
     end
 })
 
--- Instant Tab
-TabInstant:CreateToggle({
+FishingTab:Space({ Columns = 2 })
+
+-- Instant Fishing Group
+local InstantGroup = FishingTab:Group({})
+
+InstantGroup:Toggle({
     Flag = "InstantMode",
-    Name = "Enable Instant Fishing",
+    Title = "Enable Instant Fishing",
+    Icon = "zap",
     Callback = function(v)
         Core:SetMode(v and "Instant" or "None")
     end
 })
 
-TabInstant:CreateSlider({
+InstantGroup:Space()
+
+InstantGroup:Slider({
     Flag = "InstantDelay",
-    Name = "Instant Delay",
-    Min = 0.1,
-    Max = 1,
-    Default = Core.Delay.InstantDelay,
-    Increment = 0.05,
+    Title = "Instant Delay",
+    Step = 0.05,
+    Value = {
+        Min = 0.1,
+        Max = 1,
+        Default = Core.Delay.InstantDelay,
+    },
     Callback = function(v)
         Core.Delay.InstantDelay = v
     end
 })
 
--- Blatant Tab
-TabBlatant:CreateToggle({
+FishingTab:Space({ Columns = 2 })
+
+-- Blatant Fishing Group
+local BlatantGroup = FishingTab:Group({})
+
+BlatantGroup:Toggle({
     Flag = "BlatantMode",
-    Name = "Enable Blatant Mode",
+    Title = "Enable Blatant Mode",
+    Icon = "bomb",
     Callback = function(v)
         Core:SetMode(v and "Blatant" or "None")
     end
 })
 
-TabBlatant:CreateSlider({
+BlatantGroup:Space()
+
+BlatantGroup:Slider({
     Flag = "BlatantCastDelay",
-    Name = "Cast / Bait Delay",
-    Min = 0.05,
-    Max = 0.4,
-    Default = Core.Delay.Blatant.Cast,
-    Increment = 0.01,
+    Title = "Cast Delay",
+    Step = 0.01,
+    Value = {
+        Min = 0.05,
+        Max = 0.4,
+        Default = Core.Delay.Blatant.Cast,
+    },
     Callback = function(v)
         Core.Delay.Blatant.Cast = v
     end
 })
 
-TabBlatant:CreateSlider({
+BlatantGroup:Space()
+
+BlatantGroup:Slider({
     Flag = "BlatantReelDelay",
-    Name = "Reel Delay",
-    Min = 0.05,
-    Max = 0.3,
-    Default = Core.Delay.Blatant.Reel,
-    Increment = 0.01,
+    Title = "Reel Delay",
+    Step = 0.01,
+    Value = {
+        Min = 0.05,
+        Max = 0.3,
+        Default = Core.Delay.Blatant.Reel,
+    },
     Callback = function(v)
         Core.Delay.Blatant.Reel = v
     end
 })
 
--- Beta Tab
-TabBeta:CreateToggle({
+FishingTab:Space({ Columns = 2 })
+
+-- Beta Mode Group
+local BetaGroup = FishingTab:Group({})
+
+BetaGroup:Toggle({
     Flag = "BetaMode",
-    Name = "Enable Blatant Mode [BETA]",
+    Title = "Enable Blatant [BETA]",
+    Icon = "flask",
     Callback = function(v)
         Core:SetMode(v and "BlatantBeta" or "None")
     end
 })
 
-TabBeta:CreateSlider({
+BetaGroup:Space()
+
+BetaGroup:Slider({
     Flag = "BetaCastDelay",
-    Name = "Cast / Bait Delay",
-    Min = 0.03,
-    Max = 0.3,
-    Default = Core.Delay.Beta.Cast,
-    Increment = 0.01,
+    Title = "Cast Delay",
+    Step = 0.01,
+    Value = {
+        Min = 0.03,
+        Max = 0.3,
+        Default = Core.Delay.Beta.Cast,
+    },
     Callback = function(v)
         Core.Delay.Beta.Cast = v
     end
 })
 
-TabBeta:CreateSlider({
+BetaGroup:Space()
+
+BetaGroup:Slider({
     Flag = "BetaReelDelay",
-    Name = "Reel Delay",
-    Min = 0.03,
-    Max = 0.25,
-    Default = Core.Delay.Beta.Reel,
-    Increment = 0.01,
+    Title = "Reel Delay",
+    Step = 0.01,
+    Value = {
+        Min = 0.03,
+        Max = 0.25,
+        Default = Core.Delay.Beta.Reel,
+    },
     Callback = function(v)
         Core.Delay.Beta.Reel = v
     end
 })
 
--- Favorite Tab
-TabFav:CreateToggle({
-    Flag = "FavoriteLegendary",
-    Name = "Auto Favorite Legendary",
-    Callback = function(v) 
-        Core.Favorite.ByRarity["Legendary"] = v 
-    end
+-- UTILITIES TAB
+local UtilitiesTab = UtilitySection:Tab({
+    Title = "Utilities",
+    Icon = "settings",
+    IconColor = Green,
+    IconShape = "Square",
+    Border = true,
 })
 
-TabFav:CreateToggle({
-    Flag = "FavoriteMythic",
-    Name = "Auto Favorite Mythic",
-    Callback = function(v) 
-        Core.Favorite.ByRarity["Mythic"] = v 
-    end
-})
+-- Weather Group
+local WeatherGroup = UtilitiesTab:Group({})
 
--- Sell Tab
-TabSell:CreateToggle({
-    Flag = "AutoSell",
-    Name = "Enable Auto Sell",
-    Callback = function(v) 
-        Core.Sell.Enabled = v 
-    end
-})
-
-TabSell:CreateSlider({
-    Flag = "SellThreshold",
-    Name = "Auto Sell Threshold",
-    Min = 1,
-    Max = 100,
-    Default = Core.Sell.Threshold,
-    Increment = 1,
-    Callback = function(v)
-        Core.Sell.Threshold = v
-    end
-})
-
--- Weather Tab
-TabWeather:CreateToggle({
+WeatherGroup:Toggle({
     Flag = "AutoBuyAllWeather",
-    Name = "Auto Buy All Weather",
+    Title = "Auto Buy All Weather",
+    Icon = "cloud",
     Callback = function(v)
         Core.Weather.AutoBuyAll = v
     end
 })
 
-TabWeather:CreateToggle({
+WeatherGroup:Space()
+
+WeatherGroup:Toggle({
     Flag = "LoopSelectedWeather",
-    Name = "Loop Selected Weather (3)",
+    Title = "Loop Selected Weather (3)",
+    Icon = "refresh-cw",
     Callback = function(v)
         Core.Weather.LoopEnabled = v
     end
 })
 
--- Weather Selection
+WeatherGroup:Space()
+
+WeatherGroup:Section({
+    Title = "Select Weather",
+    TextSize = 14,
+})
+
 local weatherList = {"Rain","Storm","Fog","Sunny","Snow","Wind","Cloudy","Frozen","Radiant"}
 for _,w in ipairs(weatherList) do
-    TabWeather:CreateToggle({
+    WeatherGroup:Toggle({
         Flag = "Weather_"..w,
-        Name = "Select "..w,
+        Title = w,
         Callback = function(v)
             if v then
                 Core:AddWeather(w)
@@ -637,66 +692,224 @@ for _,w in ipairs(weatherList) do
     })
 end
 
--- Misc Tab
-TabMisc:CreateToggle({
+UtilitiesTab:Space({ Columns = 2 })
+
+-- Auto Sell Group
+local SellGroup = UtilitiesTab:Group({})
+
+SellGroup:Toggle({
+    Flag = "AutoSell",
+    Title = "Enable Auto Sell",
+    Icon = "dollar-sign",
+    Callback = function(v) 
+        Core.Sell.Enabled = v 
+    end
+})
+
+SellGroup:Space()
+
+SellGroup:Slider({
+    Flag = "SellThreshold",
+    Title = "Sell Threshold",
+    Step = 1,
+    Value = {
+        Min = 1,
+        Max = 100,
+        Default = Core.Sell.Threshold,
+    },
+    Callback = function(v)
+        Core.Sell.Threshold = v
+    end
+})
+
+UtilitiesTab:Space({ Columns = 2 })
+
+-- Favorite Group
+local FavoriteGroup = UtilitiesTab:Group({})
+
+FavoriteGroup:Toggle({
+    Flag = "FavoriteLegendary",
+    Title = "Auto Favorite Legendary",
+    Icon = "star",
+    Callback = function(v) 
+        Core.Favorite.ByRarity["Legendary"] = v 
+    end
+})
+
+FavoriteGroup:Space()
+
+FavoriteGroup:Toggle({
+    Flag = "FavoriteMythic",
+    Title = "Auto Favorite Mythic",
+    Icon = "star",
+    Callback = function(v) 
+        Core.Favorite.ByRarity["Mythic"] = v 
+    end
+})
+
+-- SETTINGS TAB
+local SettingsTab = SettingsSection:Tab({
+    Title = "Settings",
+    Icon = "sliders",
+    IconColor = Purple,
+    IconShape = "Square",
+    Border = true,
+})
+
+-- Performance Group
+local PerformanceGroup = SettingsTab:Group({})
+
+PerformanceGroup:Toggle({
     Flag = "NoAnimation",
-    Name = "No Fishing Animation",
+    Title = "No Fishing Animation",
+    Icon = "video-off",
     Callback = function(v) 
         Core.Misc.NoAnimation = v 
     end
 })
 
-TabMisc:CreateToggle({
+PerformanceGroup:Space()
+
+PerformanceGroup:Toggle({
     Flag = "DisableCutscene",
-    Name = "Disable Cutscene",
+    Title = "Disable Cutscene",
+    Icon = "film",
     Callback = function(v) 
         Core.Misc.DisableCutscene = v 
     end
 })
 
-TabMisc:CreateToggle({
+PerformanceGroup:Space()
+
+PerformanceGroup:Toggle({
     Flag = "DisableEffects",
-    Name = "Disable Fishing Effects",
+    Title = "Disable Fishing Effects",
+    Icon = "sparkles",
     Callback = function(v) 
         Core.Misc.DisableEffects = v 
     end
 })
 
-TabMisc:CreateToggle({
+PerformanceGroup:Space()
+
+PerformanceGroup:Toggle({
     Flag = "HideFishIcon",
-    Name = "Hide Fish Notification Icon",
+    Title = "Hide Fish Icon",
+    Icon = "eye-off",
     Callback = function(v) 
         Core.Misc.HideFishIcon = v 
     end
 })
 
-TabMisc:CreateToggle({
+PerformanceGroup:Space()
+
+PerformanceGroup:Toggle({
     Flag = "BoostFPS",
-    Name = "Boost FPS",
+    Title = "Boost FPS",
+    Icon = "zap",
     Callback = function(v) 
         Core.Misc.BoostFPS = v 
     end
 })
 
--- About Tab
-local AboutTab = Window:CreateTab("About","info-circle")
+SettingsTab:Space({ Columns = 2 })
 
-AboutTab:CreateSection({
+-- Config Group
+local ConfigGroup = SettingsTab:Group({})
+
+local ConfigManager = Window.ConfigManager
+local ConfigName = "default"
+
+local ConfigNameInput = ConfigGroup:Input({
+    Title = "Config Name",
+    Icon = "file-cog",
+    Callback = function(value)
+        ConfigName = value
+    end
+})
+
+ConfigGroup:Space()
+
+local AllConfigs = ConfigManager:AllConfigs()
+local DefaultValue = table.find(AllConfigs, ConfigName) and ConfigName or nil
+
+local AllConfigsDropdown = ConfigGroup:Dropdown({
+    Title = "All Configs",
+    Desc = "Select existing configs",
+    Values = AllConfigs,
+    Value = DefaultValue,
+    Callback = function(value)
+        ConfigName = value
+        ConfigNameInput:Set(value)
+    end
+})
+
+ConfigGroup:Space()
+
+ConfigGroup:Button({
+    Title = "Save Config",
+    Icon = "save",
+    Justify = "Center",
+    Callback = function()
+        Window.CurrentConfig = ConfigManager:Config(ConfigName)
+        if Window.CurrentConfig:Save() then
+            WindUI:Notify({
+                Title = "Config Saved",
+                Desc = "Config '" .. ConfigName .. "' saved",
+                Icon = "check",
+            })
+        end
+        AllConfigsDropdown:Refresh(ConfigManager:AllConfigs())
+    end
+})
+
+ConfigGroup:Space()
+
+ConfigGroup:Button({
+    Title = "Load Config",
+    Icon = "folder-open",
+    Justify = "Center",
+    Callback = function()
+        Window.CurrentConfig = ConfigManager:CreateConfig(ConfigName)
+        if Window.CurrentConfig:Load() then
+            WindUI:Notify({
+                Title = "Config Loaded",
+                Desc = "Config '" .. ConfigName .. "' loaded",
+                Icon = "refresh-cw",
+            })
+        end
+    end
+})
+
+-- ABOUT TAB
+local AboutTab = Window:Tab({
+    Title = "About",
+    Icon = "info",
+    IconColor = Yellow,
+    IconShape = "Square",
+    Border = true,
+})
+
+AboutTab:Section({
     Title = "Fish It Hub",
     TextSize = 24,
     FontWeight = Enum.FontWeight.SemiBold,
 })
 
-AboutTab:CreateSection({
+AboutTab:Section({
     Title = "Advanced Fishing Automation System\nWith WindUI Integration",
     TextSize = 16,
     TextTransparency = .35,
+    FontWeight = Enum.FontWeight.Medium,
 })
 
-AboutTab:CreateButton({
+AboutTab:Space({ Columns = 3 })
+
+AboutTab:Button({
     Title = "Destroy UI",
     Color = Color3.fromHex("#ff4830"),
     Justify = "Center",
+    Icon = "trash-2",
     Callback = function()
         Window:Destroy()
     end
