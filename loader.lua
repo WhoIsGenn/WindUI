@@ -1,23 +1,27 @@
---=====================================================
--- FISH IT HUB ULTIMATE - WINDUI EDITION
---=====================================================
+--[[
 
-print("🚀 Loading Fish It Hub Ultimate...")
+    Fish It Hub with WindUI
+    
+]]
 
--- Load WindUI first
+
 local WindUI
+
 do
-    local success, err = pcall(function()
-        WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/WhoIsGenn/WindUI/main/dist/main.lua"))()
+    local ok, result = pcall(function()
+        return require("./src/Init")
     end)
     
-    if not success then
-        warn("❌ Failed to load WindUI:", err)
-        return
+    if ok then
+        WindUI = result
+    else 
+        WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
     end
 end
 
-print("✅ WindUI Loaded Successfully")
+--=====================================================
+-- FISH IT HUB - CORE FISHING ENGINE
+--=====================================================
 
 --========================
 -- SERVICES
@@ -27,19 +31,17 @@ local RS = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local HttpService = game:GetService("HttpService")
-local Lighting = game:GetService("Lighting")
-local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
 
 --========================
--- SAFE REMOTE FETCH
+-- REMOTES (FISH IT)
 --========================
 local Remotes = RS:WaitForChild("Remotes")
 local FishingRemote = Remotes:WaitForChild("Fishing")
-local WeatherRemote = Remotes:FindFirstChild("Weather") or Remotes:WaitForChild("Weather")
-local SellRemote = Remotes:FindFirstChild("Sell") or Remotes:WaitForChild("Sell")
-local InventoryRemote = Remotes:FindFirstChild("Inventory") or Remotes:WaitForChild("Inventory")
+local WeatherRemote = Remotes:FindFirstChild("Weather")
+local SellRemote = Remotes:FindFirstChild("Sell")
+local InventoryRemote = Remotes:FindFirstChild("Inventory")
 
 --========================
 -- CORE TABLE
@@ -51,57 +53,28 @@ local Core = {}
 --========================
 Core.State = {
     Mode = "None",           -- None | Legit | Instant | Blatant | BlatantBeta
-    Busy = false,
+    Busy = false,            -- anti overlap
     LastCast = 0,
     LastReel = 0,
-    FishCaught = 0,
-    MoneyEarned = 0,
-    SessionStart = tick(),
-    RareFish = {
-        Mythic = 0,
-        Legendary = 0,
-        Secret = 0
-    }
 }
 
 --========================
--- CONFIGURATION
+-- DELAY CONTROLLER
 --========================
-Core.Config = {
-    -- Fishing Modes
-    LegitMode = false,
-    InstantMode = false,
-    BlatantMode = false,
-    BetaMode = false,
-    
-    -- Delays
+Core.Delay = {
     InstantDelay = 0.25,
-    BlatantCastDelay = 0.18,
-    BlatantReelDelay = 0.12,
-    BetaCastDelay = 0.10,
-    BetaReelDelay = 0.08,
-    
-    -- Auto Systems
-    AutoSell = false,
-    SellThreshold = 10,
-    AutoFavoriteLegendary = false,
-    AutoFavoriteMythic = false,
-    
-    -- Weather
-    AutoBuyAllWeather = false,
-    LoopSelectedWeather = false,
-    SelectedWeather = {},
-    
-    -- Performance
-    NoAnimation = false,
-    DisableCutscene = false,
-    DisableEffects = false,
-    HideFishIcon = false,
-    BoostFPS = false,
-    
-    -- Misc
-    CastAttempts = 6,
-    BetaCastAttempts = 12
+
+    Blatant = {
+        Cast = 0.18,
+        Reel = 0.12,
+        ReelCount = 6,
+    },
+
+    Beta = {
+        Cast = 0.10,
+        Reel = 0.08,
+        ReelCount = 12,
+    }
 }
 
 --========================
@@ -109,209 +82,99 @@ Core.Config = {
 --========================
 function Core:SetMode(mode)
     if Core.State.Mode == mode then return end
-    
+
     Core.State.Busy = false
     Core.State.LastCast = 0
     Core.State.LastReel = 0
     Core.State.Mode = mode or "None"
-    
-    print("🎯 Mode changed to:", mode)
 end
 
 --========================
--- INPUT SYSTEM
+-- INPUT HELPER (LEGIT)
 --========================
 function Core:TapMouse()
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,true,game,0)
     task.wait(0.03)
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,false,game,0)
 end
 
 --========================
--- FISHING ACTIONS
+-- CAST / REEL ACTIONS
 --========================
 function Core:Cast()
     if FishingRemote then
         FishingRemote:FireServer("Cast")
         Core.State.LastCast = tick()
-        return true
     end
-    return false
 end
 
 function Core:Reel()
     if FishingRemote then
         FishingRemote:FireServer("Reel")
         Core.State.LastReel = tick()
-        Core.State.FishCaught = Core.State.FishCaught + 1
-        Core.State.MoneyEarned = Core.State.MoneyEarned + math.random(10, 50)
-        return true
     end
-    return false
 end
 
 --========================
--- FISHING MODES
+-- LEGIT MODE
 --========================
 function Core:LegitStep()
     if Core.State.Busy then return end
     Core:TapMouse()
 end
 
+--========================
+-- INSTANT MODE
+--========================
 function Core:InstantStep()
     if Core.State.Busy then return end
     Core.State.Busy = true
-    
-    if Core:Cast() then
-        task.wait(Core.Config.InstantDelay)
-        Core:Reel()
-    end
-    
+
+    Core:Cast()
+    task.wait(Core.Delay.InstantDelay)
+    Core:Reel()
+
     Core.State.Busy = false
 end
 
+--========================
+-- BLATANT STABLE MODE
+--========================
 function Core:BlatantStep()
     if Core.State.Busy then return end
     Core.State.Busy = true
-    
-    if Core:Cast() then
-        task.wait(Core.Config.BlatantCastDelay)
-        
-        for i = 1, Core.Config.CastAttempts do
-            Core:Reel()
-            task.wait(Core.Config.BlatantReelDelay)
-        end
+
+    Core:Cast()
+    task.wait(Core.Delay.Blatant.Cast)
+
+    for i = 1, Core.Delay.Blatant.ReelCount do
+        Core:Reel()
+        task.wait(Core.Delay.Blatant.Reel)
     end
-    
+
     Core.State.Busy = false
 end
 
+--========================
+-- BLATANT BETA MODE
+--========================
 function Core:BlatantBetaStep()
     if Core.State.Busy then return end
     Core.State.Busy = true
-    
-    if Core:Cast() then
-        task.wait(Core.Config.BetaCastDelay)
-        
-        for i = 1, Core.Config.BetaCastAttempts do
-            Core:Reel()
-            task.wait(Core.Config.BetaReelDelay)
-        end
+
+    Core:Cast()
+    task.wait(Core.Delay.Beta.Cast)
+
+    for i = 1, Core.Delay.Beta.ReelCount do
+        Core:Reel()
+        task.wait(Core.Delay.Beta.Reel)
     end
-    
+
     Core.State.Busy = false
 end
 
 --========================
--- AUTO SYSTEMS
---========================
--- Auto Weather
-task.spawn(function()
-    while task.wait(5) do
-        if Core.Config.AutoBuyAllWeather and WeatherRemote then
-            for _, weather in ipairs({"Wind", "Cloudy", "Frozen", "Storm", "Radiant"}) do
-                WeatherRemote:FireServer("Buy", weather)
-                task.wait(0.6)
-            end
-        end
-        
-        if Core.Config.LoopSelectedWeather and #Core.Config.SelectedWeather == 3 and WeatherRemote then
-            for _, weather in ipairs(Core.Config.SelectedWeather) do
-                WeatherRemote:FireServer("Buy", weather)
-                task.wait(0.6)
-            end
-        end
-    end
-end)
-
--- Auto Sell
-task.spawn(function()
-    while task.wait(3) do
-        if Core.Config.AutoSell and Core.Config.SellThreshold > 0 and SellRemote then
-            SellRemote:FireServer(Core.Config.SellThreshold)
-        end
-    end
-end)
-
--- Auto Favorite
-local FavoriteSystem = {
-    ByRarity = {},
-    ByName = {}
-}
-
-function Core:ShouldFavorite(fish)
-    if FavoriteSystem.ByName[fish.Name] then
-        return true
-    end
-    if FavoriteSystem.ByRarity[fish.Rarity] then
-        return true
-    end
-    return false
-end
-
-if InventoryRemote then
-    InventoryRemote.OnClientEvent:Connect(function(fish)
-        if Core:ShouldFavorite(fish) then
-            InventoryRemote:FireServer("Favorite", fish.Id)
-        end
-    end)
-end
-
---========================
--- PERFORMANCE OPTIMIZATIONS
---========================
-function Core:ApplyNoAnimation()
-    if not Core.Config.NoAnimation then return end
-    
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    
-    for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
-        track:Stop()
-    end
-end
-
-function Core:DisableCutsceneHook()
-    if not Core.Config.DisableCutscene then return end
-    
-    local cam = workspace.CurrentCamera
-    if cam.CameraType == Enum.CameraType.Scriptable then
-        cam.CameraType = Enum.CameraType.Custom
-    end
-end
-
-function Core:DisableFishingEffects()
-    if not Core.Config.DisableEffects then return end
-    
-    for _, v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("ParticleEmitter") or v:IsA("Trail") then
-            v.Enabled = false
-        end
-    end
-end
-
-function Core:BoostFPS()
-    if not Core.Config.BoostFPS then return end
-    
-    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-    Lighting.GlobalShadows = false
-    Lighting.FogEnd = 1000
-    
-    for _, v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("BasePart") then
-            v.Material = Enum.Material.Plastic
-            v.Reflectance = 0
-        elseif v:IsA("Decal") or v:IsA("Texture") then
-            v.Transparency = 1
-        end
-    end
-end
-
---========================
--- MAIN LOOP
+-- MAIN ENGINE LOOP
 --========================
 RunService.Heartbeat:Connect(function()
     if Core.State.Mode == "Legit" then
@@ -325,60 +188,281 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- Performance loops
+--========================
+-- NOTIFICATION VISUAL CONTROLLER
+--========================
+Core.Notif = {
+    Active = {},
+    HoldTime = {
+        Blatant = 2.8,
+        Beta = 4.5,
+    },
+    MaxStack = 12
+}
+
+function Core:IsVisualMode()
+    return Core.State.Mode == "Blatant" or Core.State.Mode == "BlatantBeta"
+end
+
+local CoreGui = game:GetService("CoreGui")
+
+function Core:InitNotifHook()
+    for _,gui in ipairs(CoreGui:GetChildren()) do
+        self:TryHookNotif(gui)
+        self:HideFishIconOnly(gui)
+    end
+
+    CoreGui.ChildAdded:Connect(function(gui)
+        self:TryHookNotif(gui)
+        self:HideFishIconOnly(gui)
+    end)
+end
+
+function Core:TryHookNotif(gui)
+    if not self:IsVisualMode() then return end
+    if not gui:IsA("ScreenGui") then return end
+
+    local frame = gui:FindFirstChildWhichIsA("Frame", true)
+    local text = gui:FindFirstChildWhichIsA("TextLabel", true)
+    local icon = gui:FindFirstChildWhichIsA("ImageLabel", true)
+
+    if not frame or not text or not icon then return end
+    if #text.Text < 2 then return end
+
+    self:StackNotif(frame)
+end
+
+function Core:StackNotif(frame)
+    if #self.Notif.Active >= self.Notif.MaxStack then return end
+
+    local clone = frame:Clone()
+    clone.Parent = frame.Parent
+
+    local index = #self.Notif.Active
+    clone.Position = clone.Position + UDim2.new(0, 0, 0, index * 58)
+
+    table.insert(self.Notif.Active, clone)
+
+    local hold =
+        (self.State.Mode == "BlatantBeta")
+        and self.Notif.HoldTime.Beta
+        or self.Notif.HoldTime.Blatant
+
+    task.delay(hold, function()
+        if clone and clone.Parent then
+            clone:Destroy()
+        end
+    end)
+end
+
+task.spawn(function()
+    while task.wait(1) do
+        for i = #Core.Notif.Active, 1, -1 do
+            local gui = Core.Notif.Active[i]
+            if not gui or not gui.Parent then
+                table.remove(Core.Notif.Active, i)
+            end
+        end
+    end
+end)
+
+Core:InitNotifHook()
+
+--========================
+-- MISC / PERFORMANCE STATE
+--========================
+Core.Misc = {
+    NoAnimation = false,
+    DisableCutscene = false,
+    DisableEffects = false,
+    HideFishIcon = false,
+    BoostFPS = false,
+}
+
+function Core:ApplyNoAnimation()
+    if not self.Misc.NoAnimation then return end
+
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+
+    for _,track in ipairs(hum:GetPlayingAnimationTracks()) do
+        track:Stop()
+    end
+end
+
 RunService.Stepped:Connect(function()
     Core:ApplyNoAnimation()
 end)
+
+function Core:DisableCutsceneHook()
+    if not self.Misc.DisableCutscene then return end
+
+    local cam = workspace.CurrentCamera
+    if cam.CameraType == Enum.CameraType.Scriptable then
+        cam.CameraType = Enum.CameraType.Custom
+    end
+end
 
 RunService.RenderStepped:Connect(function()
     Core:DisableCutsceneHook()
 end)
 
+function Core:DisableFishingEffects()
+    if not self.Misc.DisableEffects then return end
+
+    for _,v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("ParticleEmitter") or v:IsA("Trail") then
+            v.Enabled = false
+        end
+    end
+end
+
 task.spawn(function()
     while task.wait(2) do
         Core:DisableFishingEffects()
-        Core:BoostFPS()
     end
 end)
 
--- Anti-AFK
-LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
+function Core:HideFishIconOnly(gui)
+    if not self.Misc.HideFishIcon then return end
+
+    for _,img in ipairs(gui:GetDescendants()) do
+        if img:IsA("ImageLabel") then
+            img.ImageTransparency = 1
+        end
+    end
+end
+
+function Core:BoostFPS()
+    if not self.Misc.BoostFPS then return end
+
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    for _,v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.Material = Enum.Material.Plastic
+            v.Reflectance = 0
+        elseif v:IsA("Decal") or v:IsA("Texture") then
+            v.Transparency = 1
+        end
+    end
+end
+
+--========================
+-- WEATHER ENGINE
+--========================
+Core.Weather = {
+    AutoBuyAll = false,
+    LoopEnabled = false,
+    Selected = {}, -- max 3
+    Delay = 0.6
+}
+function Core:AddWeather(name)
+    if #self.Weather.Selected >= 3 then return end
+    for _,v in ipairs(self.Weather.Selected) do
+        if v == name then return end
+    end
+    table.insert(self.Weather.Selected, name)
+end
+
+function Core:RemoveWeather(name)
+    for i,v in ipairs(self.Weather.Selected) do
+        if v == name then
+            table.remove(self.Weather.Selected, i)
+            break
+        end
+    end
+end
+
+task.spawn(function()
+    while task.wait(4) do
+        if Core.Weather.AutoBuyAll and WeatherRemote then
+            for _,weather in ipairs({"Wind","Cloudy","Frozen","Storm","Radiant"}) do
+                WeatherRemote:FireServer("Buy", weather)
+                task.wait(Core.Weather.Delay)
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(5) do
+        if Core.Weather.LoopEnabled and #Core.Weather.Selected == 3 and WeatherRemote then
+            for _,weather in ipairs(Core.Weather.Selected) do
+                WeatherRemote:FireServer("Buy", weather)
+                task.wait(Core.Weather.Delay)
+            end
+        end
+    end
 end)
 
 --========================
--- WINDUI INTERFACE
+-- AUTO SELL ENGINE
 --========================
+Core.Sell = {
+    Threshold = 0,
+    Enabled = false,
+    Delay = 3
+}
 
--- Colors
-local Purple = Color3.fromHex("#7775F2")
-local Yellow = Color3.fromHex("#ECA201")
-local Green = Color3.fromHex("#10C550")
-local Grey = Color3.fromHex("#83889E")
-local Blue = Color3.fromHex("#257AF7")
-local Red = Color3.fromHex("#EF4F1D")
+task.spawn(function()
+    while task.wait(Core.Sell.Delay) do
+        if Core.Sell.Enabled and Core.Sell.Threshold > 0 and SellRemote then
+            SellRemote:FireServer(Core.Sell.Threshold)
+        end
+    end
+end)
 
--- Create Main Window
+--========================
+-- FAVORITE ENGINE
+--========================
+Core.Favorite = {
+    ByRarity = {}, -- ["Legendary"]=true
+    ByName = {},   -- ["Golden Tuna"]=true
+}
+
+function Core:ShouldFavorite(fish)
+    if self.Favorite.ByName[fish.Name] then
+        return true
+    end
+    if self.Favorite.ByRarity[fish.Rarity] then
+        return true
+    end
+    return false
+end
+
+if InventoryRemote then
+    InventoryRemote.OnClientEvent:Connect(function(fish)
+        if Core:ShouldFavorite(fish) then
+            InventoryRemote:FireServer("Favorite", fish.Id)
+        end
+    end)
+end
+
+--=====================================================
+-- WINDUI INTEGRATION
+--=====================================================
+
+-- WindUI Window (using the original example structure)
 local Window = WindUI:CreateWindow({
-    Title = "🎣 Fish It Hub Ultimate",
-    Author = "by Fishing Master",
-    Folder = "FishItHub",
-    Icon = "fish",
-    IconSize = 22 * 2,
+    Title = "Fish It Hub | WindUI",
+    Folder = "fishithub",
+    Icon = "solar:folder-2-bold-duotone",
     NewElements = true,
-    Size = UDim2.fromOffset(680, 550),
     HideSearchBar = false,
     
     OpenButton = {
-        Title = "🎣 OPEN FISH HUB",
-        CornerRadius = UDim.new(1, 0),
+        Title = "Open Fish It Hub",
+        CornerRadius = UDim.new(1,0),
         StrokeThickness = 3,
         Enabled = true,
         Draggable = true,
         OnlyMobile = false,
+        
         Color = ColorSequence.new(
-            Color3.fromHex("#30FF6A"),
+            Color3.fromHex("#30FF6A"), 
             Color3.fromHex("#e7ff2f")
         )
     },
@@ -390,75 +474,72 @@ local Window = WindUI:CreateWindow({
 
 -- Version Tag
 Window:Tag({
-    Title = "v2.0 Ultimate",
-    Icon = "fish",
+    Title = "v1.0",
+    Icon = "github",
     Color = Color3.fromHex("#1c1c1c"),
     Border = true,
 })
 
--- Create Sections
+-- Colors
+local Purple = Color3.fromHex("#7775F2")
+local Yellow = Color3.fromHex("#ECA201")
+local Green = Color3.fromHex("#10C550")
+local Grey = Color3.fromHex("#83889E")
+local Blue = Color3.fromHex("#257AF7")
+local Red = Color3.fromHex("#EF4F1D")
+
+-- Create Sections for organization
 local FishingSection = Window:Section({
-    Title = "🎣 Fishing Modes",
+    Title = "Fishing Modes",
 })
 
 local UtilitySection = Window:Section({
-    Title = "⚙️ Utilities",
+    Title = "Utilities",
 })
 
 local SettingsSection = Window:Section({
-    Title = "⚡ Settings",
-})
-
-local StatsSection = Window:Section({
-    Title = "📊 Statistics",
+    Title = "Settings",
 })
 
 --======================================
--- FISHING TAB
+-- FISHING MODES TAB
 --======================================
 local FishingTab = FishingSection:Tab({
     Title = "Fishing",
-    Icon = "fish",
+    Icon = "solar:home-2-bold",
     IconColor = Blue,
     IconShape = "Square",
     Border = true,
 })
 
--- Legit Mode
+-- Legit Fishing
 FishingTab:Toggle({
-    Flag = "LegitMode",
     Title = "Auto Legit Fishing",
-    Icon = "mouse-pointer",
     Callback = function(v)
-        Core.Config.LegitMode = v
         Core:SetMode(v and "Legit" or "None")
     end
 })
 
-FishingTab:Space({ Columns = 2 })
+FishingTab:Space()
 
 -- Instant Mode
 FishingTab:Toggle({
-    Flag = "InstantMode",
     Title = "Enable Instant Fishing",
-    Icon = "zap",
     Callback = function(v)
-        Core.Config.InstantMode = v
         Core:SetMode(v and "Instant" or "None")
     end
 })
 
 FishingTab:Slider({
-    Flag = "InstantDelay",
     Title = "Instant Delay",
     Step = 0.05,
     Value = {
         Min = 0.1,
         Max = 1,
-        Default = Core.Config.InstantDelay,
+        Default = Core.Delay.InstantDelay,
     },
     Callback = function(v)
-        Core.Config.InstantDelay = v
+        Core.Delay.InstantDelay = v
     end
 })
 
@@ -466,40 +547,35 @@ FishingTab:Space({ Columns = 2 })
 
 -- Blatant Mode
 FishingTab:Toggle({
-    Flag = "BlatantMode",
     Title = "Enable Blatant Mode",
-    Icon = "bomb",
     Callback = function(v)
-        Core.Config.BlatantMode = v
         Core:SetMode(v and "Blatant" or "None")
     end
 })
 
 FishingTab:Slider({
-    Flag = "BlatantCastDelay",
     Title = "Cast Delay",
     Step = 0.01,
     Value = {
         Min = 0.05,
         Max = 0.4,
-        Default = Core.Config.BlatantCastDelay,
+        Default = Core.Delay.Blatant.Cast,
     },
     Callback = function(v)
-        Core.Config.BlatantCastDelay = v
+        Core.Delay.Blatant.Cast = v
     end
 })
 
 FishingTab:Slider({
-    Flag = "BlatantReelDelay",
     Title = "Reel Delay",
     Step = 0.01,
     Value = {
         Min = 0.05,
         Max = 0.3,
-        Default = Core.Config.BlatantReelDelay,
+        Default = Core.Delay.Blatant.Reel,
     },
     Callback = function(v)
-        Core.Config.BlatantReelDelay = v
+        Core.Delay.Blatant.Reel = v
     end
 })
 
@@ -507,40 +583,35 @@ FishingTab:Space({ Columns = 2 })
 
 -- Beta Mode
 FishingTab:Toggle({
-    Flag = "BetaMode",
-    Title = "Enable Blatant [BETA]",
-    Icon = "flask",
+    Title = "Enable Blatant Mode [BETA]",
     Callback = function(v)
-        Core.Config.BetaMode = v
         Core:SetMode(v and "BlatantBeta" or "None")
     end
 })
 
 FishingTab:Slider({
-    Flag = "BetaCastDelay",
     Title = "Cast Delay",
     Step = 0.01,
     Value = {
         Min = 0.03,
         Max = 0.3,
-        Default = Core.Config.BetaCastDelay,
+        Default = Core.Delay.Beta.Cast,
     },
     Callback = function(v)
-        Core.Config.BetaCastDelay = v
+        Core.Delay.Beta.Cast = v
     end
 })
 
 FishingTab:Slider({
-    Flag = "BetaReelDelay",
     Title = "Reel Delay",
     Step = 0.01,
     Value = {
         Min = 0.03,
         Max = 0.25,
-        Default = Core.Config.BetaReelDelay,
+        Default = Core.Delay.Beta.Reel,
     },
     Callback = function(v)
-        Core.Config.BetaReelDelay = v
+        Core.Delay.Beta.Reel = v
     end
 })
 
@@ -549,56 +620,41 @@ FishingTab:Slider({
 --======================================
 local UtilitiesTab = UtilitySection:Tab({
     Title = "Utilities",
-    Icon = "settings",
+    Icon = "solar:settings",
     IconColor = Green,
     IconShape = "Square",
     Border = true,
 })
 
--- Weather Group
+-- Weather Section
 UtilitiesTab:Section({
-    Title = "🌤️ Weather System",
+    Title = "Weather",
     TextSize = 14,
 })
 
 UtilitiesTab:Toggle({
-    Flag = "AutoBuyAllWeather",
     Title = "Auto Buy All Weather",
-    Icon = "cloud",
     Callback = function(v)
-        Core.Config.AutoBuyAllWeather = v
+        Core.Weather.AutoBuyAll = v
     end
 })
 
 UtilitiesTab:Toggle({
-    Flag = "LoopSelectedWeather",
     Title = "Loop Selected Weather (3)",
-    Icon = "refresh-cw",
     Callback = function(v)
-        Core.Config.LoopSelectedWeather = v
+        Core.Weather.LoopEnabled = v
     end
 })
 
-UtilitiesTab:Section({
-    Title = "Select Weather Types",
-    TextSize = 12,
-})
-
-local weatherList = {"Rain", "Storm", "Fog", "Sunny", "Snow", "Wind", "Cloudy", "Frozen", "Radiant"}
-for _, w in ipairs(weatherList) do
+-- Weather Selection
+for _,w in ipairs({"Rain","Storm","Fog","Sunny","Snow","Wind","Cloudy","Frozen","Radiant"}) do
     UtilitiesTab:Toggle({
-        Flag = "Weather_" .. w,
-        Title = w,
+        Title = "Select " .. w,
         Callback = function(v)
             if v then
-                table.insert(Core.Config.SelectedWeather, w)
+                Core:AddWeather(w)
             else
-                for i, weather in ipairs(Core.Config.SelectedWeather) do
-                    if weather == w then
-                        table.remove(Core.Config.SelectedWeather, i)
-                        break
-                    end
-                end
+                Core:RemoveWeather(w)
             end
         end
     })
@@ -606,60 +662,51 @@ end
 
 UtilitiesTab:Space({ Columns = 2 })
 
--- Auto Sell Group
+-- Auto Sell
 UtilitiesTab:Section({
-    Title = "💰 Auto Sell",
+    Title = "Auto Sell",
     TextSize = 14,
 })
 
 UtilitiesTab:Toggle({
-    Flag = "AutoSell",
     Title = "Enable Auto Sell",
-    Icon = "dollar-sign",
     Callback = function(v)
-        Core.Config.AutoSell = v
+        Core.Sell.Enabled = v
     end
 })
 
 UtilitiesTab:Slider({
-    Flag = "SellThreshold",
     Title = "Sell Threshold",
     Step = 1,
     Value = {
         Min = 1,
         Max = 100,
-        Default = Core.Config.SellThreshold,
+        Default = 10,
     },
     Callback = function(v)
-        Core.Config.SellThreshold = v
+        Core.Sell.Threshold = v
     end
 })
 
 UtilitiesTab:Space({ Columns = 2 })
 
--- Auto Favorite Group
+-- Auto Favorite
 UtilitiesTab:Section({
-    Title = "⭐ Auto Favorite",
+    Title = "Auto Favorite",
     TextSize = 14,
 })
 
 UtilitiesTab:Toggle({
-    Flag = "FavoriteLegendary",
     Title = "Auto Favorite Legendary",
-    Icon = "star",
     Callback = function(v)
-        Core.Config.AutoFavoriteLegendary = v
-        FavoriteSystem.ByRarity["Legendary"] = v
+        Core.Favorite.ByRarity["Legendary"] = v
     end
 })
 
 UtilitiesTab:Toggle({
-    Flag = "FavoriteMythic",
     Title = "Auto Favorite Mythic",
-    Icon = "star",
     Callback = function(v)
-        Core.Config.AutoFavoriteMythic = v
-        FavoriteSystem.ByRarity["Mythic"] = v
+        Core.Favorite.ByRarity["Mythic"] = v
     end
 })
 
@@ -668,7 +715,7 @@ UtilitiesTab:Toggle({
 --======================================
 local SettingsTab = SettingsSection:Tab({
     Title = "Settings",
-    Icon = "sliders",
+    Icon = "solar:sliders",
     IconColor = Purple,
     IconShape = "Square",
     Border = true,
@@ -676,195 +723,42 @@ local SettingsTab = SettingsSection:Tab({
 
 -- Performance Settings
 SettingsTab:Section({
-    Title = "⚡ Performance",
+    Title = "Performance",
     TextSize = 14,
 })
 
 SettingsTab:Toggle({
-    Flag = "NoAnimation",
     Title = "No Fishing Animation",
-    Icon = "video-off",
     Callback = function(v)
-        Core.Config.NoAnimation = v
+        Core.Misc.NoAnimation = v
     end
 })
 
 SettingsTab:Toggle({
-    Flag = "DisableCutscene",
     Title = "Disable Cutscene",
-    Icon = "film",
     Callback = function(v)
-        Core.Config.DisableCutscene = v
+        Core.Misc.DisableCutscene = v
     end
 })
 
 SettingsTab:Toggle({
-    Flag = "DisableEffects",
     Title = "Disable Fishing Effects",
-    Icon = "sparkles",
     Callback = function(v)
-        Core.Config.DisableEffects = v
+        Core.Misc.DisableEffects = v
     end
 })
 
 SettingsTab:Toggle({
-    Flag = "HideFishIcon",
     Title = "Hide Fish Icon",
-    Icon = "eye-off",
     Callback = function(v)
-        Core.Config.HideFishIcon = v
+        Core.Misc.HideFishIcon = v
     end
 })
 
 SettingsTab:Toggle({
-    Flag = "BoostFPS",
     Title = "Boost FPS",
-    Icon = "zap",
     Callback = function(v)
-        Core.Config.BoostFPS = v
-    end
-})
-
-SettingsTab:Space({ Columns = 2 })
-
--- Config Management
-SettingsTab:Section({
-    Title = "💾 Config Management",
-    TextSize = 14,
-})
-
-local ConfigManager = Window.ConfigManager
-local currentConfigName = "default"
-
-local ConfigNameInput = SettingsTab:Input({
-    Title = "Config Name",
-    Placeholder = "Enter config name...",
-    Callback = function(v)
-        currentConfigName = v
-    end
-})
-
-SettingsTab:Button({
-    Title = "💾 Save Config",
-    Icon = "save",
-    Justify = "Center",
-    Callback = function()
-        Window.CurrentConfig = ConfigManager:Config(currentConfigName)
-        if Window.CurrentConfig:Save() then
-            WindUI:Notify({
-                Title = "✅ Config Saved",
-                Content = "Config '" .. currentConfigName .. "' saved successfully!",
-                Icon = "check",
-            })
-        end
-    end
-})
-
-SettingsTab:Space()
-
-SettingsTab:Button({
-    Title = "📂 Load Config",
-    Icon = "folder-open",
-    Justify = "Center",
-    Callback = function()
-        Window.CurrentConfig = ConfigManager:CreateConfig(currentConfigName)
-        if Window.CurrentConfig:Load() then
-            WindUI:Notify({
-                Title = "✅ Config Loaded",
-                Content = "Config '" .. currentConfigName .. "' loaded successfully!",
-                Icon = "refresh-cw",
-            })
-        end
-    end
-})
-
---======================================
--- STATISTICS TAB
---======================================
-local StatsTab = StatsSection:Tab({
-    Title = "Stats",
-    Icon = "bar-chart",
-    IconColor = Yellow,
-    IconShape = "Square",
-    Border = true,
-})
-
-local function formatTime(seconds)
-    local hours = math.floor(seconds / 3600)
-    local minutes = math.floor((seconds % 3600) / 60)
-    local secs = math.floor(seconds % 60)
-    return string.format("%02d:%02d:%02d", hours, minutes, secs)
-end
-
--- Stats Display
-local statsLabel = StatsTab:Section({
-    Title = "📊 Live Statistics",
-    TextSize = 16,
-})
-
--- Update stats function
-local function updateStatsDisplay()
-    local sessionTime = tick() - Core.State.SessionStart
-    
-    local statsText = string.format(
-        "🎣 Fish Caught: %d\n" ..
-        "💰 Money Earned: $%d\n" ..
-        "⏱️ Session Time: %s\n" ..
-        "⭐ Rare Fish:\n" ..
-        "   Mythic: %d | Legendary: %d\n" ..
-        "   Secret: %d\n" ..
-        "🎯 Current Mode: %s",
-        Core.State.FishCaught,
-        Core.State.MoneyEarned,
-        formatTime(sessionTime),
-        Core.State.RareFish.Mythic,
-        Core.State.RareFish.Legendary,
-        Core.State.RareFish.Secret,
-        Core.State.Mode
-    )
-    
-    return statsText
-end
-
--- Create stats label with refresh
-local statsDisplay = StatsTab:Section({
-    Title = updateStatsDisplay(),
-    TextSize = 12,
-    TextTransparency = 0.2,
-})
-
--- Update stats every second
-task.spawn(function()
-    while task.wait(1) do
-        local newText = updateStatsDisplay()
-        -- Update the display
-        if statsDisplay and statsDisplay.Set then
-            pcall(function()
-                statsDisplay:Set({
-                    Title = newText
-                })
-            end)
-        end
-    end
-end)
-
-StatsTab:Space({ Columns = 2 })
-
-StatsTab:Button({
-    Title = "🔄 Reset Stats",
-    Icon = "refresh-cw",
-    Justify = "Center",
-    Callback = function()
-        Core.State.FishCaught = 0
-        Core.State.MoneyEarned = 0
-        Core.State.SessionStart = tick()
-        Core.State.RareFish = {Mythic = 0, Legendary = 0, Secret = 0}
-        
-        WindUI:Notify({
-            Title = "✅ Stats Reset",
-            Content = "All statistics have been reset!",
-            Icon = "check",
-        })
+        Core.Misc.BoostFPS = v
     end
 })
 
@@ -873,39 +767,42 @@ StatsTab:Button({
 --======================================
 local AboutTab = Window:Tab({
     Title = "About",
-    Icon = "info",
-    IconColor = Red,
+    Desc = "Fish It Hub Information",
+    Icon = "solar:info-square-bold",
+    IconColor = Grey,
     IconShape = "Square",
     Border = true,
 })
 
 AboutTab:Section({
-    Title = "🎣 Fish It Hub Ultimate",
+    Title = "Fish It Hub",
     TextSize = 24,
     FontWeight = Enum.FontWeight.SemiBold,
 })
 
 AboutTab:Section({
-    Title = "Complete Fishing Automation System\nWith WindUI Integration\n\nVersion: 2.0 Ultimate\nMade with ❤️ for Fish It Players",
+    Title = "Complete Fishing Automation System\nWith WindUI Integration",
     TextSize = 16,
     TextTransparency = .35,
+    FontWeight = Enum.FontWeight.Medium,
 })
 
-AboutTab:Space({ Columns = 3 })
+AboutTab:Space({ Columns = 4 })
 
 AboutTab:Button({
-    Title = "❌ Destroy UI",
+    Title = "Destroy Window",
     Color = Color3.fromHex("#ff4830"),
     Justify = "Center",
-    Icon = "trash-2",
+    Icon = "shredder",
+    IconAlign = "Left",
     Callback = function()
         Window:Destroy()
-        print("🎣 Fish It Hub destroyed")
+        print("Fish It Hub destroyed")
     end
 })
 
 --======================================
--- NOTIFICATION SYSTEM
+-- NOTIFICATION FUNCTION
 --======================================
 function Core:Notify(title, content, icon)
     WindUI:Notify({
@@ -916,22 +813,19 @@ function Core:Notify(title, content, icon)
     })
 end
 
--- Initial Notification
+-- Initial notification
 task.spawn(function()
-    task.wait(2)
-    Core:Notify("🎣 Fish It Hub Ultimate", "Successfully loaded! Ready to fish!", "check")
-    print("✅ Fish It Hub Ultimate loaded successfully!")
-    print("⚡ Features: Legit/Instant/Blatant/Beta modes")
-    print("⚙️ Utilities: Auto Weather, Auto Sell, Auto Favorite")
-    print("⚡ Performance: FPS Boost, No Animation, Effects Control")
+    task.wait(1)
+    Core:Notify("🎣 Fish It Hub", "Successfully loaded with WindUI!", "check")
+    print("✅ Fish It Hub loaded successfully!")
 end)
 
--- Final message
 print("\n" .. string.rep("=", 50))
-print("🎣 FISH IT HUB ULTIMATE - READY!")
+print("🎣 FISH IT HUB - WINDUI EDITION")
 print(string.rep("=", 50))
-print("🔧 Mode:", Core.State.Mode)
-print("⚙️ Features Loaded: 4 modes + 8 utilities")
-print("💾 Config System: Save/Load support")
-print("📊 Live Stats: Fish/Money/Session tracking")
+print("✅ WindUI: Loaded")
+print("✅ Core Systems: Ready")
+print("✅ Fishing Modes: 4 modes available")
+print("✅ Auto Systems: Weather, Sell, Favorite")
+print("✅ Performance: Optimized")
 print(string.rep("=", 50))
