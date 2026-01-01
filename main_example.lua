@@ -1,12 +1,429 @@
---[[
+--=====================================================
+-- FISH IT HUB - CORE FISHING ENGINE WITH WINDUI
+--=====================================================
 
-    WindUI Example (wip)
-    
-]]
+--========================
+-- SERVICES
+--========================
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
 
+local LocalPlayer = Players.LocalPlayer
 
+--========================
+-- REMOTES (FISH IT)
+--========================
+local Remotes = RS:WaitForChild("Remotes")
+local FishingRemote = Remotes:WaitForChild("Fishing")
+local WeatherRemote = Remotes:WaitForChild("Weather")
+local SellRemote = Remotes:WaitForChild("Sell")
+local InventoryRemote = Remotes:WaitForChild("Inventory")
+
+--========================
+-- CORE TABLE
+--========================
+local Core = {}
+
+--========================
+-- STATE MANAGER
+--========================
+Core.State = {
+    Mode = "None",           -- None | Legit | Instant | Blatant | BlatantBeta
+    Busy = false,            -- anti overlap
+    LastCast = 0,
+    LastReel = 0,
+}
+
+--========================
+-- DELAY CONTROLLER
+--========================
+Core.Delay = {
+    InstantDelay = 0.25,
+
+    Blatant = {
+        Cast = 0.18,
+        Reel = 0.12,
+        ReelCount = 6,
+    },
+
+    Beta = {
+        Cast = 0.10,
+        Reel = 0.08,
+        ReelCount = 12,
+    }
+}
+
+--========================
+-- MODE CONTROLLER
+--========================
+function Core:SetMode(mode)
+    if Core.State.Mode == mode then return end
+
+    Core.State.Busy = false
+    Core.State.LastCast = 0
+    Core.State.LastReel = 0
+    Core.State.Mode = mode or "None"
+end
+
+--========================
+-- INPUT HELPER (LEGIT)
+--========================
+function Core:TapMouse()
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,true,game,0)
+    task.wait(0.03)
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,false,game,0)
+end
+
+--========================
+-- CAST / REEL ACTIONS
+--========================
+function Core:Cast()
+    FishingRemote:FireServer("Cast")
+    Core.State.LastCast = tick()
+end
+
+function Core:Reel()
+    FishingRemote:FireServer("Reel")
+    Core.State.LastReel = tick()
+end
+
+--========================
+-- LEGIT MODE
+--========================
+function Core:LegitStep()
+    if Core.State.Busy then return end
+    Core:TapMouse()
+end
+
+--========================
+-- INSTANT MODE
+--========================
+function Core:InstantStep()
+    if Core.State.Busy then return end
+    Core.State.Busy = true
+
+    Core:Cast()
+    task.wait(Core.Delay.InstantDelay)
+    Core:Reel()
+
+    Core.State.Busy = false
+end
+
+--========================
+-- BLATANT STABLE MODE
+--========================
+function Core:BlatantStep()
+    if Core.State.Busy then return end
+    Core.State.Busy = true
+
+    Core:Cast()
+    task.wait(Core.Delay.Blatant.Cast)
+
+    for i = 1, Core.Delay.Blatant.ReelCount do
+        Core:Reel()
+        task.wait(Core.Delay.Blatant.Reel)
+    end
+
+    Core.State.Busy = false
+end
+
+--========================
+-- BLATANT BETA MODE
+--========================
+function Core:BlatantBetaStep()
+    if Core.State.Busy then return end
+    Core.State.Busy = true
+
+    Core:Cast()
+    task.wait(Core.Delay.Beta.Cast)
+
+    for i = 1, Core.Delay.Beta.ReelCount do
+        Core:Reel()
+        task.wait(Core.Delay.Beta.Reel)
+    end
+
+    Core.State.Busy = false
+end
+
+--========================
+-- NOTIFICATION VISUAL CONTROLLER
+--========================
+Core.Notif = {
+    Active = {},
+    HoldTime = {
+        Blatant = 2.8,
+        Beta = 4.5,
+    },
+    MaxStack = 12
+}
+
+function Core:IsVisualMode()
+    return Core.State.Mode == "Blatant" or Core.State.Mode == "BlatantBeta"
+end
+
+local CoreGui = game:GetService("CoreGui")
+
+function Core:InitNotifHook()
+    for _,gui in ipairs(CoreGui:GetChildren()) do
+        self:TryHookNotif(gui)
+        self:HideFishIconOnly(gui)
+    end
+
+    CoreGui.ChildAdded:Connect(function(gui)
+        self:TryHookNotif(gui)
+        self:HideFishIconOnly(gui)
+    end)
+end
+
+function Core:TryHookNotif(gui)
+    if not self:IsVisualMode() then return end
+    if not gui:IsA("ScreenGui") then return end
+
+    local frame = gui:FindFirstChildWhichIsA("Frame", true)
+    local text = gui:FindFirstChildWhichIsA("TextLabel", true)
+    local icon = gui:FindFirstChildWhichIsA("ImageLabel", true)
+
+    if not frame or not text or not icon then return end
+    if #text.Text < 2 then return end
+
+    self:StackNotif(frame)
+end
+
+function Core:StackNotif(frame)
+    if #self.Notif.Active >= self.Notif.MaxStack then return end
+
+    local clone = frame:Clone()
+    clone.Parent = frame.Parent
+
+    local index = #self.Notif.Active
+    clone.Position = clone.Position + UDim2.new(0, 0, 0, index * 58)
+
+    table.insert(self.Notif.Active, clone)
+
+    local hold =
+        (self.State.Mode == "BlatantBeta")
+        and self.Notif.HoldTime.Beta
+        or self.Notif.HoldTime.Blatant
+
+    task.delay(hold, function()
+        if clone and clone.Parent then
+            clone:Destroy()
+        end
+    end)
+end
+
+task.spawn(function()
+    while task.wait(1) do
+        for i = #Core.Notif.Active, 1, -1 do
+            local gui = Core.Notif.Active[i]
+            if not gui or not gui.Parent then
+                table.remove(Core.Notif.Active, i)
+            end
+        end
+    end
+end)
+
+Core:InitNotifHook()
+
+--========================
+-- MISC / PERFORMANCE STATE
+--========================
+Core.Misc = {
+    NoAnimation = false,
+    DisableCutscene = false,
+    DisableEffects = false,
+    HideFishIcon = false,
+    BoostFPS = false,
+}
+
+function Core:ApplyNoAnimation()
+    if not self.Misc.NoAnimation then return end
+
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+
+    for _,track in ipairs(hum:GetPlayingAnimationTracks()) do
+        track:Stop()
+    end
+end
+
+function Core:DisableCutsceneHook()
+    if not self.Misc.DisableCutscene then return end
+
+    local cam = workspace.CurrentCamera
+    if cam.CameraType == Enum.CameraType.Scriptable then
+        cam.CameraType = Enum.CameraType.Custom
+    end
+end
+
+function Core:DisableFishingEffects()
+    if not self.Misc.DisableEffects then return end
+
+    for _,v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("ParticleEmitter") or v:IsA("Trail") then
+            v.Enabled = false
+        end
+    end
+end
+
+function Core:HideFishIconOnly(gui)
+    if not self.Misc.HideFishIcon then return end
+
+    for _,img in ipairs(gui:GetDescendants()) do
+        if img:IsA("ImageLabel") then
+            img.ImageTransparency = 1
+        end
+    end
+end
+
+function Core:BoostFPS()
+    if not self.Misc.BoostFPS then return end
+
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    for _,v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.Material = Enum.Material.Plastic
+            v.Reflectance = 0
+        elseif v:IsA("Decal") or v:IsA("Texture") then
+            v.Transparency = 1
+        end
+    end
+end
+
+--========================
+-- WEATHER ENGINE
+--========================
+Core.Weather = {
+    AutoBuyAll = false,
+    LoopEnabled = false,
+    Selected = {}, -- max 3
+    Delay = 0.6
+}
+
+function Core:AddWeather(name)
+    if #self.Weather.Selected >= 3 then return end
+    for _,v in ipairs(self.Weather.Selected) do
+        if v == name then return end
+    end
+    table.insert(self.Weather.Selected, name)
+end
+
+function Core:RemoveWeather(name)
+    for i,v in ipairs(self.Weather.Selected) do
+        if v == name then
+            table.remove(self.Weather.Selected, i)
+            break
+        end
+    end
+end
+
+task.spawn(function()
+    while task.wait(4) do
+        if Core.Weather.AutoBuyAll then
+            for _,weather in ipairs({"Wind","Cloudy","Frozen","Storm","Radiant"}) do
+                WeatherRemote:FireServer("Buy", weather)
+                task.wait(Core.Weather.Delay)
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(5) do
+        if Core.Weather.LoopEnabled and #Core.Weather.Selected == 3 then
+            for _,weather in ipairs(Core.Weather.Selected) do
+                WeatherRemote:FireServer("Buy", weather)
+                task.wait(Core.Weather.Delay)
+            end
+        end
+    end
+end)
+
+--========================
+-- AUTO SELL ENGINE
+--========================
+Core.Sell = {
+    Threshold = 10,
+    Enabled = false,
+    Delay = 3
+}
+
+task.spawn(function()
+    while task.wait(Core.Sell.Delay) do
+        if Core.Sell.Enabled and Core.Sell.Threshold > 0 then
+            SellRemote:FireServer(Core.Sell.Threshold)
+        end
+    end
+end)
+
+--========================
+-- FAVORITE ENGINE
+--========================
+Core.Favorite = {
+    ByRarity = {}, -- ["Legendary"]=true
+    ByName = {},   -- ["Golden Tuna"]=true
+}
+
+function Core:ShouldFavorite(fish)
+    if self.Favorite.ByName[fish.Name] then
+        return true
+    end
+    if self.Favorite.ByRarity[fish.Rarity] then
+        return true
+    end
+    return false
+end
+
+InventoryRemote.OnClientEvent:Connect(function(fish)
+    if Core:ShouldFavorite(fish) then
+        InventoryRemote:FireServer("Favorite", fish.Id)
+    end
+end)
+
+--========================
+-- MAIN ENGINE LOOP
+--========================
+RunService.Heartbeat:Connect(function()
+    if Core.State.Mode == "Legit" then
+        Core:LegitStep()
+    elseif Core.State.Mode == "Instant" then
+        Core:InstantStep()
+    elseif Core.State.Mode == "Blatant" then
+        Core:BlatantStep()
+    elseif Core.State.Mode == "BlatantBeta" then
+        Core:BlatantBetaStep()
+    end
+end)
+
+RunService.Stepped:Connect(function()
+    Core:ApplyNoAnimation()
+end)
+
+RunService.RenderStepped:Connect(function()
+    Core:DisableCutsceneHook()
+end)
+
+task.spawn(function()
+    while task.wait(2) do
+        Core:DisableFishingEffects()
+        if Core.Misc.BoostFPS then
+            Core:BoostFPS()
+        end
+    end
+end)
+
+--=====================================================
+-- WINDUI INTEGRATION
+--=====================================================
+
+-- Load WindUI
 local WindUI
-
 do
     local ok, result = pcall(function()
         return require("./src/Init")
@@ -19,1227 +436,286 @@ do
     end
 end
 
---[[
-
-WindUI.Creator.AddIcons("solar", {
-    ["CheckSquareBold"] = "rbxassetid://132438947521974",
-    ["CursorSquareBold"] = "rbxassetid://120306472146156",
-    ["FileTextBold"] = "rbxassetid://89294979831077",
-    ["FolderWithFilesBold"] = "rbxassetid://74631950400584",
-    ["HamburgerMenuBold"] = "rbxassetid://134384554225463",
-    ["Home2Bold"] = "rbxassetid://92190299966310",
-    ["InfoSquareBold"] = "rbxassetid://119096461016615",
-    ["PasswordMinimalisticInputBold"] = "rbxassetid://109919668957167",
-    ["SolarSquareTransferHorizontalBold"] = "rbxassetid://125444491429160",
-})--]]
-
-
-function createPopup()
-    return WindUI:Popup({
-        Title = "Welcome to the WindUI!",
-        Icon = "bird",
-        Content = "Hello!",
-        Buttons = {
-            {
-                Title = "Hahaha",
-                Icon = "bird",
-                Variant = "Tertiary"
-            },
-            {
-                Title = "Hahaha",
-                Icon = "bird",
-                Variant = "Tertiary"
-            },
-            {
-                Title = "Hahaha",
-                Icon = "bird",
-                Variant = "Tertiary"
-            }
-        }
-    })
-end
-
-
-
--- */  Window  /* --
+-- Create Main Window
 local Window = WindUI:CreateWindow({
-    Title = ".ftgs hub  |  WindUI Example",
-    --Author = "by .ftgs • Footagesus",
-    Folder = "ftgshub",
-    Icon = "solar:folder-2-bold-duotone",
-    --IconSize = 22*2,
-    NewElements = true,
-    --Size = UDim2.fromOffset(700,700),
-    
-    HideSearchBar = false,
-    
+    Title = "Fish It Hub",
+    Theme = "Dark",
+    Size = UDim2.fromScale(0.55, 0.65),
+    HasOutline = true,
     OpenButton = {
-        Title = "Open .ftgs hub UI", -- can be changed
-        CornerRadius = UDim.new(1,0), -- fully rounded
-        StrokeThickness = 3, -- removing outline
-        Enabled = true, -- enable or disable openbutton
+        Title = "Open Fish It Hub",
+        CornerRadius = UDim.new(1,0),
+        StrokeThickness = 3,
+        Enabled = true,
         Draggable = true,
         OnlyMobile = false,
-        
-        Color = ColorSequence.new( -- gradient
+        Color = ColorSequence.new(
             Color3.fromHex("#30FF6A"), 
             Color3.fromHex("#e7ff2f")
         )
     },
     Topbar = {
         Height = 44,
-        ButtonsType = "Mac", -- Default or Mac
+        ButtonsType = "Mac",
     },
-
-    --[[
-    KeySystem = {
-        Title = "Key System Example  |  WindUI Example",
-        Note = "Key System. Key: 1234",
-        KeyValidator = function(EnteredKey)
-            if EnteredKey == "1234" then
-                createPopup()
-                return true
-            end
-            return false
-            -- return EnteredKey == "1234" -- if key == "1234" then return true else return false end
-        end
-    }
-    ]]
+    Folder = "FishItHub"
 })
 
---createPopup()
+-- Create Tabs
+local TabFishing  = Window:CreateTab("Fishing","fish")
+local TabInstant  = Window:CreateTab("Instant","zap")
+local TabBlatant  = Window:CreateTab("Blatant","bomb")
+local TabBeta     = Window:CreateTab("Blatant [BETA]","flask")
+local TabMisc     = Window:CreateTab("MISC","settings")
+local TabWeather  = Window:CreateTab("Weather","cloud")
+local TabFav      = Window:CreateTab("Favorite","star")
+local TabSell     = Window:CreateTab("Sell","dollar-sign")
 
---Window:SetUIScale(.8)
-
--- */  Tags  /* --
-do
-    Window:Tag({
-        Title = "v" .. WindUI.Version,
-        Icon = "github",
-        Color = Color3.fromHex("#1c1c1c"),
-        Border = true,
-    })
-end
-
--- */  Theme (soon)  /* --
-do
-    --[[WindUI:AddTheme({
-        Name = "Stylish",
-        
-        Accent = Color3.fromHex("#3b82f6"), 
-        Dialog = Color3.fromHex("#1a1a1a"), 
-        Outline = Color3.fromHex("#3b82f6"),
-        Text = Color3.fromHex("#f8fafc"),  
-        Placeholder = Color3.fromHex("#94a3b8"),
-        Button = Color3.fromHex("#334155"), 
-        Icon = Color3.fromHex("#60a5fa"), 
-        
-        WindowBackground = Color3.fromHex("#0f172a"),
-        
-        TopbarButtonIcon = Color3.fromHex("#60a5fa"),
-        TopbarTitle = Color3.fromHex("#f8fafc"),
-        TopbarAuthor = Color3.fromHex("#94a3b8"),
-        TopbarIcon = Color3.fromHex("#3b82f6"),
-        
-        TabBackground = Color3.fromHex("#1e293b"),    
-        TabTitle = Color3.fromHex("#f8fafc"),
-        TabIcon = Color3.fromHex("#60a5fa"),
-        
-        ElementBackground = Color3.fromHex("#1e293b"),
-        ElementTitle = Color3.fromHex("#f8fafc"),
-        ElementDesc = Color3.fromHex("#cbd5e1"),
-        ElementIcon = Color3.fromHex("#60a5fa"),
-    })--]]
-    
-    -- WindUI:SetTheme("Stylish")
-end
-
-
--- */  Colors  /* --
-local Purple = Color3.fromHex("#7775F2")
-local Yellow = Color3.fromHex("#ECA201")
-local Green = Color3.fromHex("#10C550")
-local Grey = Color3.fromHex("#83889E")
-local Blue = Color3.fromHex("#257AF7")
-local Red = Color3.fromHex("#EF4F1D")
-
-
--- */ Other Functions /* --
-local function parseJSON(luau_table, indent, level, visited)
-    indent = indent or 2
-    level = level or 0
-    visited = visited or {}
-    
-    local currentIndent = string.rep(" ", level * indent)
-    local nextIndent = string.rep(" ", (level + 1) * indent)
-    
-    if luau_table == nil then
-        return "null"
+-- Fishing Tab
+TabFishing:CreateToggle({
+    Name = "Auto Legit Fishing",
+    Callback = function(v)
+        Core:SetMode(v and "Legit" or "None")
     end
-    
-    local dataType = type(luau_table)
-    
-    if dataType == "table" then
-        if visited[luau_table] then
-            return "\"[Circular Reference]\""
-        end
-        
-        visited[luau_table] = true
-        
-        local isArray = true
-        local maxIndex = 0
-        
-        for k, _ in pairs(luau_table) do
-            if type(k) == "number" and k > maxIndex then
-                maxIndex = k
-            end
-            if type(k) ~= "number" or k <= 0 or math.floor(k) ~= k then
-                isArray = false
-                break
-            end
-        end
-        
-        local count = 0
-        for _ in pairs(luau_table) do
-            count = count + 1
-        end
-        if count ~= maxIndex and isArray then
-            isArray = false
-        end
-        
-        if count == 0 then
-            return "{}"
-        end
-        
-        if isArray then
-            if count == 0 then
-                return "[]"
-            end
-            
-            local result = "[\n"
-            
-            for i = 1, maxIndex do
-                result = result .. nextIndent .. parseJSON(luau_table[i], indent, level + 1, visited)
-                if i < maxIndex then
-                    result = result .. ","
-                end
-                result = result .. "\n"
-            end
-            
-            result = result .. currentIndent .. "]"
-            return result
-        else
-            local result = "{\n"
-            local first = true
-            
-            local keys = {}
-            for k in pairs(luau_table) do
-                table.insert(keys, k)
-            end
-            table.sort(keys, function(a, b)
-                if type(a) == type(b) then
-                    return tostring(a) < tostring(b)
-                else
-                    return type(a) < type(b)
-                end
-            end)
-            
-            for _, k in ipairs(keys) do
-                local v = luau_table[k]
-                if not first then
-                    result = result .. ",\n"
-                else
-                    first = false
-                end
-                
-                if type(k) == "string" then
-                    result = result .. nextIndent .. "\"" .. k .. "\": "
-                else
-                    result = result .. nextIndent .. "\"" .. tostring(k) .. "\": "
-                end
-                
-                result = result .. parseJSON(v, indent, level + 1, visited)
-            end
-            
-            result = result .. "\n" .. currentIndent .. "}"
-            return result
-        end
-    elseif dataType == "string" then
-        local escaped = luau_table:gsub("\\", "\\\\")
-        escaped = escaped:gsub("\"", "\\\"")
-        escaped = escaped:gsub("\n", "\\n")
-        escaped = escaped:gsub("\r", "\\r")
-        escaped = escaped:gsub("\t", "\\t")
-        
-        return "\"" .. escaped .. "\""
-    elseif dataType == "number" then
-        return tostring(luau_table)
-    elseif dataType == "boolean" then
-        return luau_table and "true" or "false"
-    elseif dataType == "function" then
-        return "\"function\""
-    else
-        return "\"" .. dataType .. "\""
+})
+
+-- Instant Tab
+TabInstant:CreateToggle({
+    Flag = "InstantMode",
+    Name = "Enable Instant Fishing",
+    Callback = function(v)
+        Core:SetMode(v and "Instant" or "None")
     end
-end
-
-local function tableToClipboard(luau_table, indent)
-    indent = indent or 4
-    local jsonString = parseJSON(luau_table, indent)
-    setclipboard(jsonString)
-    return jsonString
-end
-
-
--- */  About Tab  /* --
-do
-    local AboutTab = Window:Tab({
-        Title = "About WindUI",
-        Desc = "Description Example", 
-        Icon = "solar:info-square-bold",
-        IconColor = Grey,
-        IconShape = "Square",
-        Border = true,
-    })
-    
-    local AboutSection = AboutTab:Section({
-        Title = "About WindUI",
-    })
-    
-    AboutSection:Image({
-        Image = "https://repository-images.githubusercontent.com/880118829/22c020eb-d1b1-4b34-ac4d-e33fd88db38d",
-        AspectRatio = "16:9",
-        Radius = 9,
-    })
-    
-    AboutSection:Space({ Columns = 3 })
-    
-    AboutSection:Section({
-        Title = "What is WindUI?",
-        TextSize = 24,
-        FontWeight = Enum.FontWeight.SemiBold,
-    })
-
-    AboutSection:Space()
-    
-    AboutSection:Section({
-        Title = [[WindUI is a stylish, open-source UI (User Interface) library specifically designed for Roblox Script Hubs.
-Developed by Footagesus (.ftgs, Footages).
-It aims to provide developers with a modern, customizable, and easy-to-use toolkit for creating visually appealing interfaces within Roblox.
-The project is primarily written in Lua (Luau), the scripting language used in Roblox.]],
-        TextSize = 18,
-        TextTransparency = .35,
-        FontWeight = Enum.FontWeight.Medium,
-    })
-    
-    AboutTab:Space({ Columns = 4 }) 
-    
-    
-    -- Default buttons
-    
-    AboutTab:Button({
-        Title = "Export WindUI JSON (copy)",
-        Color = Color3.fromHex("#a2ff30"),
-        Justify = "Center",
-        IconAlign = "Left",
-        Icon = "", -- removing icon
-        Callback = function()
-            tableToClipboard(WindUI)
-            WindUI:Notify({
-                Title = "WindUI JSON",
-                Content = "Copied to Clipboard!"
-            })
-        end
-    })
-    AboutTab:Space({ Columns = 1 }) 
-    
-    
-    AboutTab:Button({
-        Title = "Destroy Window",
-        Color = Color3.fromHex("#ff4830"),
-        Justify = "Center",
-        Icon = "shredder",
-        IconAlign = "Left",
-        Callback = function()
-            Window:Destroy()
-        end
-    })
-end
-
--- */  Elements Section  /* --
-local ElementsSection = Window:Section({
-    Title = "Elements",
-})
-local ConfigUsageSection = Window:Section({
-    Title = "Config Usage",
-})
-local OtherSection = Window:Section({
-    Title = "Other",
 })
 
+TabInstant:CreateSlider({
+    Flag = "InstantDelay",
+    Name = "Instant Delay",
+    Min = 0.1,
+    Max = 1,
+    Default = Core.Delay.InstantDelay,
+    Increment = 0.05,
+    Callback = function(v)
+        Core.Delay.InstantDelay = v
+    end
+})
 
+-- Blatant Tab
+TabBlatant:CreateToggle({
+    Flag = "BlatantMode",
+    Name = "Enable Blatant Mode",
+    Callback = function(v)
+        Core:SetMode(v and "Blatant" or "None")
+    end
+})
 
+TabBlatant:CreateSlider({
+    Flag = "BlatantCastDelay",
+    Name = "Cast / Bait Delay",
+    Min = 0.05,
+    Max = 0.4,
+    Default = Core.Delay.Blatant.Cast,
+    Increment = 0.01,
+    Callback = function(v)
+        Core.Delay.Blatant.Cast = v
+    end
+})
 
--- */  Overview Tab  /* --
-do
-    local OverviewTab = ElementsSection:Tab({
-        Title = "Overview",
-        Icon = "solar:home-2-bold",
-        IconColor = Grey,
-        IconShape = "Square",
-        Border = true,
-    })
-    
-    local OverviewSection1 = OverviewTab:Section({
-        Title = "Group's Example"
-    })
-    
-    local OverviewGroup1 = OverviewTab:Group({})
-    
-    OverviewGroup1:Button({ Title = "Button 1", Justify = "Center", Icon = "", Callback = function() print("clicked button 1") end })
-    OverviewGroup1:Space()
-    OverviewGroup1:Button({ Title = "Button 2", Justify = "Center", Icon = "", Callback = function() print("clicked button 2") end })
-    
-    OverviewTab:Space()
-    
-    local OverviewGroup2 = OverviewTab:Group({})
-    
-    OverviewGroup2:Button({ Title = "Button 1", Justify = "Center", Icon = "", Callback = function() print("clicked button 1") end })
-    OverviewGroup2:Space()
-    OverviewGroup2:Toggle({ Title = "Toggle 2",  Callback = function(v) print("clicked toggle 2:", v) end })
-    OverviewGroup2:Space()
-    OverviewGroup2:Colorpicker({ Title = "Colorpicker 3", Default = Color3.fromHex("#30ff6a"), Callback = function(color) print(color) end })
-    
-    OverviewTab:Space()
-    
-    local OverviewGroup3 = OverviewTab:Group({})
-    
-    
-    local OverviewSection1 = OverviewGroup3:Section({
-        Title = "Section 1",
-        Desc = "Section exampleee",
-        Box = true,
-        BoxBorder = true,
-        Opened = true,
-    })
-    OverviewSection1:Button({ Title = "Button 1", Justify = "Center", Icon = "", Callback = function() print("clicked button 1") end })
-    OverviewSection1:Space()
-    OverviewSection1:Toggle({ Title = "Toggle 2",  Callback = function(v) print("clicked toggle 2:", v) end })
-    
-    
-    OverviewGroup3:Space()
-    
-    
-    local OverviewSection2 = OverviewGroup3:Section({
-        Title = "Section 2",
-        Box = true,
-        BoxBorder = true,
-        Opened = true,
-    })
-    OverviewSection2:Button({ Title = "Button 1", Justify = "Center", Icon = "", Callback = function() print("clicked button 1") end })
-    OverviewSection2:Space()
-    OverviewSection2:Button({ Title = "Button 2", Justify = "Center", Icon = "", Callback = function() print("clicked button 2") end })
+TabBlatant:CreateSlider({
+    Flag = "BlatantReelDelay",
+    Name = "Reel Delay",
+    Min = 0.05,
+    Max = 0.3,
+    Default = Core.Delay.Blatant.Reel,
+    Increment = 0.01,
+    Callback = function(v)
+        Core.Delay.Blatant.Reel = v
+    end
+})
 
-    --OverviewTab:Space()
-    
-end
+-- Beta Tab
+TabBeta:CreateToggle({
+    Flag = "BetaMode",
+    Name = "Enable Blatant Mode [BETA]",
+    Callback = function(v)
+        Core:SetMode(v and "BlatantBeta" or "None")
+    end
+})
 
+TabBeta:CreateSlider({
+    Flag = "BetaCastDelay",
+    Name = "Cast / Bait Delay",
+    Min = 0.03,
+    Max = 0.3,
+    Default = Core.Delay.Beta.Cast,
+    Increment = 0.01,
+    Callback = function(v)
+        Core.Delay.Beta.Cast = v
+    end
+})
 
--- */  Toggle Tab  /* --
-do
-    local ToggleTab = ElementsSection:Tab({
-        Title = "Toggle",
-        Icon = "solar:check-square-bold",
-        IconColor = Green,
-        IconShape = "Square",
-        Border = true,
-    })
-    
-    
-    ToggleTab:Toggle({
-        Title = "Toggle",
-    })
-    
-    ToggleTab:Space()
-    
-    ToggleTab:Toggle({
-        Title = "Toggle",
-        Desc = "Toggle example"
-    })
-    
-    ToggleTab:Space()
-    
-    local ToggleGroup1 = ToggleTab:Group()
-    ToggleGroup1:Toggle({})
-    ToggleGroup1:Space()
-    ToggleGroup1:Toggle({})
-    
-    ToggleTab:Space()
-    
-    ToggleTab:Toggle({
-        Title = "Checkbox",
-        Type = "Checkbox",
-    })
-    
-    ToggleTab:Space()
-    
-    ToggleTab:Toggle({
-        Title = "Checkbox",
-        Desc = "Checkbox example",
-        Type = "Checkbox",
-    })
-    
-    ToggleTab:Space()
-    
-    
-    ToggleTab:Toggle({
-        Title = "Toggle",
-        Locked = true,
-        LockedTitle = "This element is locked",
-    })
-    
-    ToggleTab:Toggle({
-        Title = "Toggle",
-        Desc = "Toggle example",
-        Locked = true,
-        LockedTitle = "This element is locked",
-    })
-end
+TabBeta:CreateSlider({
+    Flag = "BetaReelDelay",
+    Name = "Reel Delay",
+    Min = 0.03,
+    Max = 0.25,
+    Default = Core.Delay.Beta.Reel,
+    Increment = 0.01,
+    Callback = function(v)
+        Core.Delay.Beta.Reel = v
+    end
+})
 
+-- Favorite Tab
+TabFav:CreateToggle({
+    Flag = "FavoriteLegendary",
+    Name = "Auto Favorite Legendary",
+    Callback = function(v) 
+        Core.Favorite.ByRarity["Legendary"] = v 
+    end
+})
 
--- */  Button Tab  /* --
-do
-    local ButtonTab = ElementsSection:Tab({
-        Title = "Button",
-        Icon = "solar:cursor-square-bold",
-        IconColor = Blue,
-        IconShape = "Square",
-        Border = true,
-    })
-    
-    
-    local HighlightButton
-    HighlightButton = ButtonTab:Button({
-        Title = "Highlight Button",
-        Icon = "mouse",
-        Callback = function()
-            print("clicked highlight")
-            HighlightButton:Highlight()
-        end
-    })
+TabFav:CreateToggle({
+    Flag = "FavoriteMythic",
+    Name = "Auto Favorite Mythic",
+    Callback = function(v) 
+        Core.Favorite.ByRarity["Mythic"] = v 
+    end
+})
 
-    ButtonTab:Space()
-    
-    ButtonTab:Button({
-        Title = "Blue Button",
-        Color = Color3.fromHex("#305dff"),
-        Icon = "",
-        Callback = function()
-        end
-    })
+-- Sell Tab
+TabSell:CreateToggle({
+    Flag = "AutoSell",
+    Name = "Enable Auto Sell",
+    Callback = function(v) 
+        Core.Sell.Enabled = v 
+    end
+})
 
-    ButtonTab:Space()
-    
-    ButtonTab:Button({
-        Title = "Blue Button",
-        Desc = "With description",
-        Color = Color3.fromHex("#305dff"),
-        Icon = "",
-        Callback = function()
-        end
-    })
-    
-    ButtonTab:Space()
-    
-    ButtonTab:Button({
-        Title = "Notify Button",
-        --Desc = "Button example",
-        Callback = function()
-            WindUI:Notify({
-                Title = "Hello",
-                Content = "Welcome to the WindUI Example!",
-                Icon = "solar:bell-bold",
-                Duration = 5,
-                CanClose = false,
-            })
-        end
-    })
-    
-    
-    ButtonTab:Button({
-        Title = "Notify Button 2",
-        --Desc = "Button example",
-        Callback = function()
-            WindUI:Notify({
-                Title = "Hello",
-                Content = "Welcome to the WindUI Example!",
-                --Icon = "solar:bell-bold",
-                Duration = 5,
-                CanClose = false,
-            })
-        end
-    })
-    
-    ButtonTab:Space()
-    
-    ButtonTab:Button({
-        Title = "Button",
-        Locked = true,
-        LockedTitle = "This element is locked",
-    })
-    
-    
-    ButtonTab:Button({
-        Title = "Button",
-        Desc = "Button example",
-        Locked = true,
-        LockedTitle = "This element is locked",
-    })
-end
+TabSell:CreateSlider({
+    Flag = "SellThreshold",
+    Name = "Auto Sell Threshold",
+    Min = 1,
+    Max = 100,
+    Default = Core.Sell.Threshold,
+    Increment = 1,
+    Callback = function(v)
+        Core.Sell.Threshold = v
+    end
+})
 
+-- Weather Tab
+TabWeather:CreateToggle({
+    Flag = "AutoBuyAllWeather",
+    Name = "Auto Buy All Weather",
+    Callback = function(v)
+        Core.Weather.AutoBuyAll = v
+    end
+})
 
--- */  Input Tab  /* --
-do
-    local InputTab = ElementsSection:Tab({
-        Title = "Input",
-        Icon = "solar:password-minimalistic-input-bold",
-        IconColor = Purple,
-        IconShape = "Square",
-        Border = true,
-    })
-    
-    
-    InputTab:Input({
-        Title = "Input",
-        Icon = "mouse"
-    })
-    
-    InputTab:Space()
-    
-    
-    InputTab:Input({
-        Title = "Input Textarea",
-        Type = "Textarea",
-        Icon = "mouse",
-    })
-    
-    InputTab:Space()
-    
-    
-    InputTab:Input({
-        Title = "Input Textarea",
-        Type = "Textarea",
-        --Icon = "mouse",
-    })
-    
-    InputTab:Space()
-    
-    
-    InputTab:Input({
-        Title = "Input",
-        Desc = "Input example",
-    })
-    
-    InputTab:Space()
-    
-    
-    InputTab:Input({
-        Title = "Input Textarea",
-        Desc = "Input example",
-        Type = "Textarea",
-    })
-    
-    InputTab:Space()
-    
-    
-    InputTab:Input({
-        Title = "Input",
-        Locked = true,
-        LockedTitle = "This element is locked",
-    })
-    
-    
-    InputTab:Input({
-        Title = "Input",
-        Desc = "Input example",
-        Locked = true,
-        LockedTitle = "This element is locked",
-    })
-end
+TabWeather:CreateToggle({
+    Flag = "LoopSelectedWeather",
+    Name = "Loop Selected Weather (3)",
+    Callback = function(v)
+        Core.Weather.LoopEnabled = v
+    end
+})
 
-
--- */  Slider Tab  /* --
-do
-    local SliderTab = ElementsSection:Tab({
-        Title = "Slider",
-        Icon = "solar:square-transfer-horizontal-bold",
-        IconColor = Green,
-        IconShape = "Square",
-        Border = true,
-    })
-    
-    SliderTab:Section({
-        Title = "Default Slider with Tooltip and without textbox",
-        TextSize = 14,
-    })
-    
-    SliderTab:Slider({
-        Title = "Slider Example",
-        Desc = "Hahahahaha hello",
-        IsTooltip = true,
-        IsTextbox = false,
-        Width = 200,
-        Step = 1,
-        Value = {
-            Min = 0,
-            Max = 200,
-            Default = 100,
-        },
-        Callback = function(value)
-            print(value)
-        end
-    })
-
-    SliderTab:Space()
-    
-    SliderTab:Section({
-        Title = "Slider without description",
-        TextSize = 14,
-    })
-    
-    SliderTab:Slider({
-        Title = "Slider Example",
-        Step = 1,
-        Width = 200,
-        Value = {
-            Min = 0,
-            Max = 200,
-            Default = 100,
-        },
-        Callback = function(value)
-            print(value)
-        end
-    })
-
-    SliderTab:Space()
-    
-    SliderTab:Section({
-        Title = "Slider without titles",
-        TextSize = 14,
-    })
-    
-    SliderTab:Slider({
-        IsTooltip = true,
-        Step = 1,
-        Value = {
-            Min = 0,
-            Max = 200,
-            Default = 100,
-        },
-        Callback = function(value)
-            print(value)
-        end
-    })
-
-    SliderTab:Space()
-    
-    SliderTab:Section({
-        Title = "Slider with icons ('from' only)",
-        TextSize = 14,
-    })
-    
-    SliderTab:Slider({
-        IsTooltip = true,
-        Step = 1,
-        Value = {
-            Min = 0,
-            Max = 200,
-            Default = 100,
-        },
-        Icons = {
-            From = "sfsymbols:sunMinFill",
-            --To = "sfsymbols:sunMaxFill",
-        },
-        Callback = function(value)
-            print(value)
-        end
-    })
-
-    SliderTab:Space()
-    
-    SliderTab:Section({
-        Title = "Slider with icons (from & to)",
-        TextSize = 14,
-    })
-    
-    SliderTab:Slider({
-        IsTooltip = true,
-        Step = 1,
-        Value = {
-            Min = 0,
-            Max = 100,
-            Default = 50,
-        },
-        Icons = {
-            From = "sfsymbols:sunMinFill",
-            To = "sfsymbols:sunMaxFill",
-        },
-        Callback = function(value)
-            print(value)
-        end
-    })
-end
-
-
--- */  Dropdown Tab  /* --
-do
-    local DropdownTab = ElementsSection:Tab({
-        Title = "Dropdown",
-        Icon = "solar:hamburger-menu-bold",
-        IconColor = Yellow,
-        IconShape = "Square",
-        Border = true,
-    })
-    
-    
-    DropdownTab:Dropdown({
-        Title = "Advanced Dropdown (example)",
-        Values = {
-            {
-                Title = "New file",
-                Desc = "Create a new file",
-                Icon = "file-plus",
-                Callback = function() 
-                    print("Clicked 'New File'")
-                end
-            },
-            {
-                Title = "Copy link",
-                Desc = "Copy the file link",
-                Icon = "copy",
-                Callback = function() 
-                    print("Clicked 'Copy link'")
-                end
-            },
-            {
-                Title = "Edit file",
-                Desc = "Allows you to edit the file",
-                Icon = "file-pen",
-                Callback = function() 
-                    print("Clicked 'Edit file'")
-                end
-            },
-            {
-                Type = "Divider",
-            },
-            {
-                Title = "Delete file",
-                Desc = "Permanently delete the file",
-                Icon = "trash",
-                Callback = function() 
-                    print("Clicked 'Delete file'")
-                end
-            },
-        }
-    })
-    
-    DropdownTab:Space()
-    
-    DropdownTab:Dropdown({
-        Title = "Multi Dropdown",
-        Values = {
-            "Привет", "Hello", "Сәлем", "Bonjour"
-        },
-        Value = nil,
-        AllowNone = true,
-        Multi = true,
-        Callback = function(selectedValue)
-            print("Selected: " .. selectedValue)
-        end
-    })
-    
-    DropdownTab:Space()
-    
-    DropdownTab:Dropdown({
-        Title = "No Multi Dropdown (default",
-        Values = {
-            "Привет", "Hello", "Сәлем", "Bonjour"
-        },
-        Value = 1,
-        --AllowNone = true,
-        Callback = function(selectedValue)
-            print("Selected: " .. selectedValue)
-        end
-    })
-    
-    DropdownTab:Space()
-    
-    
-end
-
-
-
---[[  idk. VideoFrame is not working with custom video on exploits
-      I don't know why
-    
--- */  Video Tab  /* --
-do
-    local VideoTab = ElementsSection:Tab({
-        Title = "Video",
-        Icon = "video",
-    })
-    
-    VideoTab:Video({
-        Title = "My Video Hahahah", -- optional
-        Author = ".ftgs", -- optional
-        Video = "https://cdn.discordapp.com/attachments/1337368451865645096/1402703845657673878/VID_20250616_180732_158.webm?ex=68fc5f01&is=68fb0d81&hm=f4f0a88dbace2d3cef92535b2e57effae6d4c4fc444338163faafa7f3fdac529&"
-    })
-end
-
---]]
-
-
--- */  Config Usage  /* --
-do -- config elements
-    local ConfigElementsTab = ConfigUsageSection:Tab({
-        Title = "Config Elements",
-        Icon = "solar:file-text-bold",
-        IconColor = Blue,
-        IconShape = nil,
-        Border = true,
-    })
-    
-    -- All elements are taken from the official documentation: https://footagesus.github.io/WindUI-Docs/docs
-    
-    -- Saving elements to the config using `Flag`
-    
-    ConfigElementsTab:Colorpicker({
-        Flag = "ColorpickerTest",
-        Title = "Colorpicker",
-        Desc = "Colorpicker Description",
-        Default = Color3.fromRGB(0, 255, 0),
-        Transparency = 0,
-        Locked = false,
-        Callback = function(color) 
-            print("Background color: " .. tostring(color))
-        end
-    })
-    
-    ConfigElementsTab:Space()
-    
-    ConfigElementsTab:Dropdown({
-        Flag = "DropdownTest",
-        Title = "Advanced Dropdown",
-        Values = {
-            {
-                Title = "Category A",
-                Icon = "bird"
-            },
-            {
-                Title = "Category B",
-                Icon = "house"
-            },
-            {
-                Title = "Category C",
-                Icon = "droplet"
-            },
-        },
-        Value = "Category A",
-        Callback = function(option) 
-            print("Category selected: " .. option.Title .. " with icon " .. option.Icon) 
-        end
-    })
-    ConfigElementsTab:Dropdown({
-        Flag = "DropdownTest2",
-        Title = "Advanced Dropdown 2",
-        Values = {
-            {
-                Title = "Category A",
-                Icon = "bird"
-            },
-            {
-                Title = "Category B",
-                Icon = "house"
-            },
-            {
-                Title = "Category C",
-                Icon = "droplet",
-                Locked = true,
-            },
-        },
-        Value = "Category A",
-        Multi = true,
-        Callback = function(options) 
-            local titles = {}
-            for _, v in ipairs(options) do
-                table.insert(titles, v.Title)
-            end
-            print("Selected: " .. table.concat(titles, ", "))
-        end
-    })
-    
-    
-    ConfigElementsTab:Space()
-    
-    ConfigElementsTab:Input({
-        Flag = "InputTest",
-        Title = "Input",
-        Desc = "Input Description",
-        Value = "Default value",
-        InputIcon = "bird",
-        Type = "Input", -- or "Textarea"
-        Placeholder = "Enter text...",
-        Callback = function(input) 
-            print("Text entered: " .. input)
-        end
-    })
-    
-    ConfigElementsTab:Space()
-    
-    ConfigElementsTab:Keybind({
-        Flag = "KeybindTest",
-        Title = "Keybind",
-        Desc = "Keybind to open ui",
-        Value = "G",
+-- Weather Selection
+local weatherList = {"Rain","Storm","Fog","Sunny","Snow","Wind","Cloudy","Frozen","Radiant"}
+for _,w in ipairs(weatherList) do
+    TabWeather:CreateToggle({
+        Flag = "Weather_"..w,
+        Name = "Select "..w,
         Callback = function(v)
-            Window:SetToggleKey(Enum.KeyCode[v])
-        end
-    })
-    
-    ConfigElementsTab:Space()
-    
-    ConfigElementsTab:Slider({
-        Flag = "SliderTest",
-        Title = "Slider",
-        Step = 1,
-        Value = {
-            Min = 20,
-            Max = 120,
-            Default = 70,
-        },
-        Callback = function(value)
-            print(value)
-        end
-    })
-    ConfigElementsTab:Slider({
-        Flag = "SliderTest2",
-        --Title = "Slider",
-        Icons = {
-            From = "sfsymbols:sunMinFill",
-            To = "sfsymbols:sunMaxFill",
-        },
-        Step = 1,
-        IsTooltip = true,
-        Value = {
-            Min = 0,
-            Max = 100,
-            Default = 50,
-        },
-        Callback = function(value)
-            print(value)
-        end
-    })
-    
-    ConfigElementsTab:Space()
-    
-    ConfigElementsTab:Toggle({
-        Flag = "ToggleTest",
-        Title = "Toggle Panel Background",
-        --Desc = "Toggle Description",
-        --Icon = "house",
-        --Type = "Checkbox",
-        Value = not Window.HidePanelBackground,
-        Callback = function(state) 
-            Window:SetPanelBackground(state)
-        end
-    })
-    
-    ConfigElementsTab:Toggle({
-        Flag = "ToggleTest",
-        Title = "Toggle",
-        Desc = "Toggle Description",
-        --Icon = "house",
-        --Type = "Checkbox",
-        Value = false,
-        Callback = function(state) 
-            print("Toggle Activated" .. tostring(state))
+            if v then
+                Core:AddWeather(w)
+            else
+                Core:RemoveWeather(w)
+            end
         end
     })
 end
 
-do -- config panel
-    local ConfigTab = ConfigUsageSection:Tab({
-        Title = "Config Usage",
-        Icon = "solar:folder-with-files-bold",
-        IconColor = Purple,
-        IconShape = nil,
-        Border = true,
-    })
-
-    local ConfigManager = Window.ConfigManager
-    local ConfigName = "default"
-
-    local ConfigNameInput = ConfigTab:Input({
-        Title = "Config Name",
-        Icon = "file-cog",
-        Callback = function(value)
-            ConfigName = value
-        end
-    })
-
-    ConfigTab:Space()
-    
-    -- local AutoLoadToggle = ConfigTab:Toggle({
-    --     Title = "Enable Auto Load to Selected Config",
-    --     Value = false,
-    --     Callback = function(v)
-    --         Window.CurrentConfig:SetAutoLoad(v)
-    --     end
-    -- })
-
-    -- ConfigTab:Space()
-
-    local AllConfigs = ConfigManager:AllConfigs()
-    local DefaultValue = table.find(AllConfigs, ConfigName) and ConfigName or nil
-
-    local AllConfigsDropdown = ConfigTab:Dropdown({
-        Title = "All Configs",
-        Desc = "Select existing configs",
-        Values = AllConfigs,
-        Value = DefaultValue,
-        Callback = function(value)
-            ConfigName = value
-            ConfigNameInput:Set(value)
-            
-            AutoLoadToggle:Set(ConfigManager:GetConfig(ConfigName).AutoLoad or false)
-        end
-    })
-
-    ConfigTab:Space()
-
-    ConfigTab:Button({
-        Title = "Save Config",
-        Icon = "",
-        Justify = "Center",
-        Callback = function()
-            Window.CurrentConfig = ConfigManager:Config(ConfigName)
-            if Window.CurrentConfig:Save() then
-                WindUI:Notify({
-                    Title = "Config Saved",
-                    Desc = "Config '" .. ConfigName .. "' saved",
-                    Icon = "check",
-                })
-            end
-            
-            AllConfigsDropdown:Refresh(ConfigManager:AllConfigs())
-        end
-    })
-
-    ConfigTab:Space()
-
-    ConfigTab:Button({
-        Title = "Load Config",
-        Icon = "",
-        Justify = "Center",
-        Callback = function()
-            Window.CurrentConfig = ConfigManager:CreateConfig(ConfigName)
-            if Window.CurrentConfig:Load() then
-                WindUI:Notify({
-                    Title = "Config Loaded",
-                    Desc = "Config '" .. ConfigName .. "' loaded",
-                    Icon = "refresh-cw",
-                })
-            end
-        end
-    })
-
-    ConfigTab:Space()
-
-    ConfigTab:Button({
-        Title = "Print AutoLoad Configs",
-        Icon = "",
-        Justify = "Center",
-        Callback = function()
-            print(HttpService:JSONDecode(ConfigManager:GetAutoLoadConfigs()))
-        end
-    })
-end
-
-
-
-
--- */  Other  /* --
-do
-    local InviteCode = "ftgs-development-hub-1300692552005189632"
-    local DiscordAPI = "https://discord.com/api/v10/invites/" .. InviteCode .. "?with_counts=true&with_expiration=true"
-
-    local Response = WindUI.cloneref(game:GetService("HttpService")):JSONDecode(WindUI.Creator.Request({
-        Url = DiscordAPI,
-        Method = "GET",
-        Headers = {
-            ["User-Agent"] = "WindUI/Example",
-            ["Accept"] = "application/json"
-        }
-    }).Body)
-    
-    local DiscordTab = OtherSection:Tab({
-        Title = "Discord",
-        Border = true,
-    })
-    
-    if Response and Response.guild then
-        DiscordTab:Section({
-            Title = "Join our Discord server!",
-            TextSize = 20,
-        })
-        local DiscordServerParagraph = DiscordTab:Paragraph({
-            Title = tostring(Response.guild.name),
-            Desc = tostring(Response.guild.description),
-            Image = "https://cdn.discordapp.com/icons/" .. Response.guild.id .. "/" .. Response.guild.icon .. ".png?size=1024",
-            Thumbnail = "https://cdn.discordapp.com/banners/1300692552005189632/35981388401406a4b7dffd6f447a64c4.png?size=512",
-            ImageSize = 48,
-            Buttons = {
-                {
-                    Title = "Copy link",
-                    Icon = "link",
-                    Callback = function()
-                        setclipboard("https://discord.gg/" .. InviteCode)
-                    end
-                }
-            }
-        })
-        
+-- Misc Tab
+TabMisc:CreateToggle({
+    Flag = "NoAnimation",
+    Name = "No Fishing Animation",
+    Callback = function(v) 
+        Core.Misc.NoAnimation = v 
     end
-end
+})
 
+TabMisc:CreateToggle({
+    Flag = "DisableCutscene",
+    Name = "Disable Cutscene",
+    Callback = function(v) 
+        Core.Misc.DisableCutscene = v 
+    end
+})
 
+TabMisc:CreateToggle({
+    Flag = "DisableEffects",
+    Name = "Disable Fishing Effects",
+    Callback = function(v) 
+        Core.Misc.DisableEffects = v 
+    end
+})
 
--- */ Using Nebula Icons /* --
---[[
-do
-    local NebulaIcons = loadstring(game:HttpGetAsync("https://raw.nebulasoftworks.xyz/nebula-icon-library-loader"))()
-    
-    -- Adding icons (e.g. Fluency)
-    WindUI.Creator.AddIcons("fluency",    NebulaIcons.Fluency)
-    --               ^ Icon name          ^ Table of Icons
-    
-    -- You can also add nebula icons
-    WindUI.Creator.AddIcons("nebula",    NebulaIcons.nebulaIcons)
-    
-    -- Usage ↑ ↓
-    
-    local TestSection = Window:Section({
-        Title = "Custom icons usage test (nebula)",
-        Icon = "nebula:nebula",
+TabMisc:CreateToggle({
+    Flag = "HideFishIcon",
+    Name = "Hide Fish Notification Icon",
+    Callback = function(v) 
+        Core.Misc.HideFishIcon = v 
+    end
+})
+
+TabMisc:CreateToggle({
+    Flag = "BoostFPS",
+    Name = "Boost FPS",
+    Callback = function(v) 
+        Core.Misc.BoostFPS = v 
+    end
+})
+
+-- About Tab
+local AboutTab = Window:CreateTab("About","info-circle")
+
+AboutTab:CreateSection({
+    Title = "Fish It Hub",
+    TextSize = 24,
+    FontWeight = Enum.FontWeight.SemiBold,
+})
+
+AboutTab:CreateSection({
+    Title = "Advanced Fishing Automation System\nWith WindUI Integration",
+    TextSize = 16,
+    TextTransparency = .35,
+})
+
+AboutTab:CreateButton({
+    Title = "Destroy UI",
+    Color = Color3.fromHex("#ff4830"),
+    Justify = "Center",
+    Callback = function()
+        Window:Destroy()
+    end
+})
+
+-- Create notification function
+function Core:Notify(title, content, icon)
+    WindUI:Notify({
+        Title = title,
+        Content = content,
+        Icon = icon or "bell",
+        Duration = 3,
     })
 end
-]]
---[[
 
-local EndButStartTab = Window:Tab({
-    Title = "EndButStartTab",
-    -- u can use `Before` or `After`
-    Before = AboutTab, -- put this tab Before AboutTab
-    
-})
---]]
+-- Initial notification
+task.spawn(function()
+    task.wait(1)
+    Core:Notify("Fish It Hub", "Successfully loaded with WindUI!", "check")
+end)
+
+print("Fish It Hub with WindUI loaded successfully!")
